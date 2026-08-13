@@ -84,7 +84,7 @@
   color: var(--vp-c-brand-2);
 }
 
-/* ---- mermaid 图：居中卡片 + 阴影 ---- */
+/* ---- mermaid 图：居中卡片 + overflow 兜底 ---- */
 .vp-doc .mermaid-wrapper,
 .vp-doc .mermaid {
   display: flex;
@@ -94,6 +94,7 @@
   background: var(--vp-c-bg-soft, var(--vp-c-bg-alt));
   border: 1px solid var(--vp-c-divider);
   border-radius: 10px;
+  overflow-x: auto;
 }
 .vp-doc .mermaid svg {
   max-width: 100%;

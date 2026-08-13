@@ -63,19 +63,21 @@
 全书架构图（业务闭环链路 × 三层自治 × 章节）：
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph L1["L1 机械自治 · 基础设施稳态"]
-      direction TB
-      A1["不可变基础设施<br/>第 2 章"] --> A2["K8s 底座<br/>第 4–8 章"] --> A3["声明式 + GitOps<br/>第 5/9/10 章"]
+      direction LR
+      A1["不可变<br/>ch2"] --> A2["K8s 底座<br/>ch4–8"] --> A3["声明式+GitOps<br/>ch5/9/10"]
     end
     subgraph L2["L2 运维自治 · 业务稳定"]
-      direction TB
-      A3 --> B1["灰度治理<br/>第 11 章"] --> B2["全域可观测<br/>第 12 章"] --> B3["SRE 稳定性<br/>第 13–14 章"] --> B4["平台封装 + 自治<br/>第 15–16 章"]
+      direction LR
+      B1["灰度<br/>ch11"] --> B2["可观测<br/>ch12"] --> B3["SRE<br/>ch13–14"] --> B4["平台+自治<br/>ch15–16"]
     end
     subgraph L3["L3 智能自治 · AI 动态"]
-      direction TB
-      B4 --> C1["AI 异构算力<br/>第 17 章"] --> C2["推理性能 / KV<br/>第 18 章"] --> C3["智能自治闭环<br/>第 18.9"]
+      direction LR
+      C1["AI 算力<br/>ch17"] --> C2["推理/KV<br/>ch18"] --> C3["自治闭环<br/>ch18.9"]
     end
+    A3 --> B1
+    B4 --> C1
     classDef l1 fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
     classDef l2 fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
     classDef l3 fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px

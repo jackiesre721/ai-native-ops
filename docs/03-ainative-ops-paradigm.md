@@ -10,7 +10,7 @@
 本章核心图——AI 负载完整生命周期（全书 AI 章节统一锚点）：
 
 ```mermaid
-flowchart LR
+flowchart TB
     T[训练] --> A[模型归档] --> R[模型仓库] --> D[服务部署] --> I[在线推理]
     I --> S[弹性扩缩] --> O[可观测治理] --> F[故障处置] --> C[成本管控] --> U[智能自治]
     classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
