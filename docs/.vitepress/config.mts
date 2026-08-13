@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 
-export default withMermaid(
-  defineConfig({
+export default withMermaid({
+  ...defineConfig({
     title: '现代运维体系',
     description: '从云原生到 AI 原生的生产控制系统',
     base: '/ai-native-ops/',
@@ -120,5 +120,19 @@ export default withMermaid(
       lineNumbers: true,
       theme: { light: 'github-light', dark: 'github-dark' }
     }
-  })
-)
+  }),
+  mermaid: {
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#3451b2',
+      primaryTextColor: '#ffffff',
+      primaryBorderColor: '#2a4090',
+      lineColor: '#6b7280',
+      secondaryColor: '#e0e7ff',
+      secondaryTextColor: '#1e3a8a',
+      tertiaryColor: '#f1f5f9',
+      tertiaryTextColor: '#374151',
+      fontSize: '14px'
+    }
+  }
+})

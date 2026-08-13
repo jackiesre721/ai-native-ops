@@ -50,6 +50,12 @@ flowchart LR
     L3["L3 智能自治<br/>观测 → 推理 → 决策 → 执行 → 校验 → 反馈<br/>动态·自适应学习"]
     L1 -->|提供可信稳态| L2
     L2 -->|提供 SLO 校验| L3
+    classDef l1 fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
+    classDef l2 fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+    classDef l3 fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    class L1 l1
+    class L2 l2
+    class L3 l3
 ```
 
 > **关于 L2 闭环步数**：L2 闭环全书统一为 5 步（监控感知 → 风险预判 → 自动处置 → 结果校验 → 复盘迭代），本表定义与 16.4 落地一致；README/CONVENTIONS 的 3 步（观测风险 → 决策处置 → 结果校验）是概述层的压缩表达，非另一套闭环。

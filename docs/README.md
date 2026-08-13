@@ -76,6 +76,12 @@ flowchart LR
       direction TB
       B4 --> C1["AI 异构算力<br/>第 17 章"] --> C2["推理性能 / KV<br/>第 18 章"] --> C3["智能自治闭环<br/>第 18.9"]
     end
+    classDef l1 fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
+    classDef l2 fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+    classDef l3 fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    class A1,A2,A3 l1
+    class B1,B2,B3,B4 l2
+    class C1,C2,C3 l3
 ```
 
 一句话：控制权沿这条链从人 → 机械自愈 → 业务自治 → 智能自治逐级转移，三层自治是它的纵轴。

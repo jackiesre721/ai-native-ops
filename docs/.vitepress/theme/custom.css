@@ -1,0 +1,111 @@
+/**
+ * 现代运维体系 · 自定义主题
+ * 品牌色：控制系统靛蓝；三层自治语义色：L1 靛蓝 / L2 绿 / L3 紫
+ */
+
+:root {
+  /* ---- 品牌色（链接/按钮/标题锚点自动继承） ---- */
+  --vp-c-brand-1: #3451b2;
+  --vp-c-brand-2: #3a5ccc;
+  --vp-c-brand-3: #5672cd;
+  --vp-c-brand: var(--vp-c-brand-1);
+  --vp-c-brand-light: #5672cd;
+  --vp-c-brand-dark: #2a4090;
+
+  /* ---- 三层自治语义色（正文/图统一引用） ---- */
+  --c-l1: #3451b2;   /* L1 机械自治 · 靛蓝 */
+  --c-l2: #16a34a;   /* L2 运维自治 · 绿 */
+  --c-l3: #7c3aed;   /* L3 智能自治 · 紫 */
+
+  /* ---- 首页 hero 渐变 ---- */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #3451b2, #7c3aed);
+  --vp-home-hero-image-background-image: linear-gradient(-45deg, #3451b2 50%, #7c3aed 50%);
+  --vp-home-hero-image-filter: blur(44px);
+
+  /* ---- 代码块品牌色（inline code） ---- */
+  --vp-c-code-bg: rgba(52, 81, 178, 0.08);
+}
+
+.dark {
+  --vp-c-brand-1: #7c98ff;
+  --vp-c-brand-2: #8da6ff;
+  --vp-c-brand-3: #a5baff;
+  --vp-c-brand-light: #a5baff;
+  --vp-c-brand-dark: #5a72d6;
+  --vp-c-code-bg: rgba(124, 152, 255, 0.14);
+}
+
+/* ---- blockquote：边注/声明 callout（左侧色条 + 浅底） ---- */
+.vp-doc blockquote {
+  border-left: 4px solid var(--vp-c-brand-1);
+  background-color: var(--vp-c-bg-alt);
+  padding: 10px 16px;
+  border-radius: 6px;
+  color: var(--vp-c-text-2);
+  margin: 16px 0;
+  font-size: 0.95em;
+}
+.vp-doc blockquote p {
+  margin: 6px 0;
+  line-height: 1.6;
+}
+.vp-doc blockquote strong {
+  color: var(--vp-c-text-1);
+}
+
+/* ---- 表格：圆角 + 表头底色 + 条纹 ---- */
+.vp-doc table {
+  display: block;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 16px 0;
+}
+.vp-doc th {
+  background-color: var(--vp-c-bg-alt);
+  font-weight: 600;
+}
+.vp-doc tr:nth-child(2n) {
+  background-color: rgba(52, 81, 178, 0.04);
+}
+.dark .vp-doc tr:nth-child(2n) {
+  background-color: rgba(124, 152, 255, 0.06);
+}
+
+/* ---- inline code：品牌色底 ---- */
+.vp-doc :not(pre) > code {
+  background-color: var(--vp-c-code-bg);
+  color: var(--vp-c-brand-1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.dark .vp-doc :not(pre) > code {
+  color: var(--vp-c-brand-2);
+}
+
+/* ---- mermaid 图：居中卡片 + 阴影 ---- */
+.vp-doc .mermaid-wrapper,
+.vp-doc .mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+  padding: 20px;
+  background: var(--vp-c-bg-soft, var(--vp-c-bg-alt));
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+}
+.vp-doc .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---- 标题：锚点 hover 用品牌色（自动继承） ---- */
+.vp-doc h1, .vp-doc h2, .vp-doc h3 {
+  scroll-margin-top: 80px;
+}
+
+/* ---- 自定义容器（VitePress ::: tip/warning）视觉增强 ---- */
+.vp-doc .custom-block {
+  border-radius: 8px;
+}
