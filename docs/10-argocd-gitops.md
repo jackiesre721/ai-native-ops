@@ -4,6 +4,7 @@
 > 本章定位：讲落地、讲运行。基于 ArgoCD 讲清 GitOps 交付体系，承接第 9 章 IaC 思想，为第 11 章灰度治理奠基。
 
 > **技术栈锁死**：本章交付栈涉及组件 = ArgoCD + Helm。不引入 Flux 等同类替代。
+> **去工具化**：本章讲的是"声明式 + Git 真相源 + 持续同步（pull + reconcile）"的 GitOps 原理，ArgoCD 只是参考实例，换 Flux 等照样适用（详见 CONVENTIONS 三）。
 > **边界声明**：本章只讲 GitOps 交付落地；灰度发布归第 11 章；CI 底层机制不展开，归 V2。
 
 ---

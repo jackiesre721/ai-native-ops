@@ -37,13 +37,15 @@
 
 ---
 
-## 三、技术栈锁死清单（永久不变）
+## 三、技术栈选型：参考实例，原理通用（去工具化）
 
-| 类别 | 锁死组件 | 备注 |
+本书锁定的不是"唯一可用组件"，而是"一个参考实例"——用它保证全书落地一致。**底层原理与组件无关，换成等价栈知识照样适用**；组件选型与对比不展开（归 V2）。读者应带走"该怎么设计"的判断力，而非"必须用这些组件"。
+
+| 类别 | 参考实例 | 原理（与组件无关，换栈照样适用） |
 |---|---|---|
-| **可观测栈** | VictoriaMetrics（指标）、Loki（日志）、Tempo（链路）、OpenTelemetry（采集）、Grafana（可视化） | 不引入任何替代组件（不写 Prometheus/ELK/Jaeger 等替代） |
-| **交付栈** | Helm、ArgoCD、Argo Rollouts | 不追加同类替代组件（不写 Flux 等替代） |
-| **AI 推理栈** | vLLM、SGLang | 不新增任何其他推理引擎（不写 Triton/DeepSpeed/Ray Serve 等） |
+| **可观测栈** | VictoriaMetrics（指标）、Loki（日志）、Tempo（链路）、OpenTelemetry（采集）、Grafana（可视化） | 三支柱协同 + trace ID 关联 + 低成本存储 + 统一可视化 |
+| **交付栈** | Helm、ArgoCD、Argo Rollouts | 声明式 + Git 真相源 + 持续同步 + 渐进发布 + 风险护栏 |
+| **AI 推理栈** | vLLM、SGLang | Continuous Batching + KV Cache + 推理性能/容量模型 | |
 
 ---
 
