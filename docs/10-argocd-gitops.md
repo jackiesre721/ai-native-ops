@@ -48,6 +48,17 @@ GitOps 最小落地：
 
 ### 生产落地实现
 
+GitOps 的 pull + reconcile 模型（CI 不持集群凭据、集群内 controller 持续同步）：
+
+```mermaid
+flowchart LR
+    CI[CI 构建] -->|推镜像| REG[(制品仓库)]
+    CI -->|改 tag 字段| GIT[(Git 真相源<br/>chart-root)]
+    GIT -->|pull| ARG[ArgoCD controller<br/>集群内]
+    ARG -->|reconcile 同步| CL[集群实际状态]
+    ARG -.->|持续校验偏离| CL
+```
+
 - 真相源：chart-root 仓库（部署清单 + values），GitOps 拉取对象。
 - controller：ArgoCD 部署在集群内，配 Git 只读凭据。
 - CI 边界：CI 只负责构建镜像 + 推仓库 + 改 chart-root 的镜像 tag 字段（不部署）。
