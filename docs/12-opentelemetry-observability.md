@@ -46,6 +46,16 @@
 
 **事实二：trace 和 metric 是同一次调用的两个产物，exemplar 是把它们粘起来的桥。**
 
+```mermaid
+flowchart TB
+    REQ([用户请求到 A]) --> A["A server span<br/>（服务级 RED 指标）"]
+    A --> AB["A→B 调用 span"]
+    A --> ADB["A→DB span"]
+    AB --> B["B server span"]
+    BIZ[业务指标<br/>order_total] -. "时间对齐<br/>（RED 桥）" .-> A
+    A -. "exemplar → trace_id" .-> TRACE[(Tempo trace 树)]
+```
+
 一次 A 调 B，被 OTel 自动埋点**同时**产出两样东西：一个 span（进 Tempo）和一组 RED 指标（进 VM，如 `http.client.request.duration`）。exemplar 就是 metric 数据点上的一个字段，指向同一次调用的那个 span。所以三者关系是：**同一次调用 → 产出一对（span + metric 点）→ exemplar 是 metric 点上指向 span 的指针**。exemplar 不创造新数据，它给"已存在的 metric 点"加一个 trace_id 指针。
 
 **事实三：exemplar 只挂"每请求性能（RED）"这一层，业务计数器和基础设施指标不该挂、也挂不上。**
