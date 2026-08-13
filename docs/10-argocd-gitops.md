@@ -51,21 +51,24 @@ GitOps 最小落地：
 GitOps 的 pull + reconcile 模型（CI 不持集群凭据、集群内 controller 持续同步）：
 
 ```mermaid
-flowchart LR
+flowchart TB
     CI[CI 构建] -->|推镜像| REG[(制品仓库)]
-    CI -->|改 tag 字段| GIT[(Git 真相源<br/>chart-root)]
-    GIT -->|pull| ARG[ArgoCD controller<br/>集群内]
-    ARG -->|reconcile 同步| CL[集群实际状态]
-    ARG -.->|持续校验偏离| CL
+    CI -->|改版本| CR[(chart-root<br/>版本控制)]
+    CR --> APP["ArgoCD Application<br/>repoUrl → service-chart"]
+    APP --> SVC["service-chart<br/>业务 chart + values"]
+    SVC -->|Helm deps| BASE["base-chart<br/>公共模板"]
+    BASE --> ARG[ArgoCD 渲染同步]
+    SVC --> ARG
+    ARG -->|reconcile| CL[集群实际状态]
     classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
     classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
     classDef data fill:#ccfbf1,stroke:#0d9488,color:#134e4a
     class CI,ARG start
-    class REG,GIT data
-    class CL proc
+    class REG,CR data
+    class APP,SVC,BASE,CL proc
 ```
 
-- 真相源：chart-root 仓库拉齐三层——**基础 chart**（公共最佳实践：探针/资源/网络/监控，9.4）+ **业务 chart**（继承基础 chart，只填业务差异：镜像/端口/环境变量）+ **环境 values**（dev/qa/prod 分文件）；ArgoCD 拉的是这套完整组合，不只是"部署清单 + values"。
+- **真相源链路（三仓库分工）**：**chart-root**（版本控制）生成 ArgoCD Application → Application 的 `repoUrl` 指向 **service-chart**（业务 chart）→ service-chart 通过 Helm `dependencies` 引用 **base-chart**（公共模板：探针/资源/网络/监控，9.4）→ ArgoCD 渲染 base + service + values → 同步集群。chart-root 管版本、service-chart 管业务形态、base-chart 管公共最佳实践——三者分工，不是堆在一个仓库。
 - controller：ArgoCD 部署在集群内，配 Git 只读凭据。
 - CI 边界：CI 只负责构建镜像 + 推仓库 + 改 chart-root 的镜像 tag 字段（不部署）。
 - 同步：ArgoCD 检测 Git 变化 → 同步到集群 → 持续校验一致性。
