@@ -1,0 +1,16 @@
+# VitePress 构建产物
+node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
+# 注意：package-lock.json 保留（提交），保证 CI 构建可复现
+
+# 系统 / 编辑器
+.DS_Store
+.omc/
+.zcode/
+.vscode/
+.idea/
+
+# 工具会话记忆
+.workbuddy/
