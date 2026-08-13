@@ -65,7 +65,7 @@ flowchart LR
     class CL proc
 ```
 
-- 真相源：chart-root 仓库（部署清单 + values），GitOps 拉取对象。
+- 真相源：chart-root 仓库拉齐三层——**基础 chart**（公共最佳实践：探针/资源/网络/监控，9.4）+ **业务 chart**（继承基础 chart，只填业务差异：镜像/端口/环境变量）+ **环境 values**（dev/qa/prod 分文件）；ArgoCD 拉的是这套完整组合，不只是"部署清单 + values"。
 - controller：ArgoCD 部署在集群内，配 Git 只读凭据。
 - CI 边界：CI 只负责构建镜像 + 推仓库 + 改 chart-root 的镜像 tag 字段（不部署）。
 - 同步：ArgoCD 检测 Git 变化 → 同步到集群 → 持续校验一致性。
