@@ -11,8 +11,17 @@
 
 ```mermaid
 flowchart TB
-    T[训练] --> A[模型归档] --> R[模型仓库] --> D[服务部署] --> I[在线推理]
-    I --> S[弹性扩缩] --> O[可观测治理] --> F[故障处置] --> C[成本管控] --> U[智能自治]
+    subgraph r1[" "]
+      direction LR
+      T[训练] --> A[模型归档] --> R[模型仓库] --> D[服务部署] --> I[在线推理]
+    end
+    subgraph r2[" "]
+      direction LR
+      S[弹性扩缩] --> O[可观测治理] --> F[故障处置] --> C[成本管控] --> U[智能自治]
+    end
+    I --> S
+    style r1 fill:none,stroke:none
+    style r2 fill:none,stroke:none
     classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
     classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
     class T,U start

@@ -110,7 +110,7 @@
 flowchart LR
     D([期望状态 Desired]) --> C{控制器<br/>持续比对}
     A[实际状态 Actual] --> C
-    C -->|偏离则纠正| ACT[调谐动作]
+    C --> ACT[调谐动作<br/>偏离则纠正]
     ACT --> A
     classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
     classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
