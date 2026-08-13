@@ -54,6 +54,12 @@ flowchart TB
     AB --> B["B server span"]
     BIZ[业务指标<br/>order_total] -. "时间对齐<br/>（RED 桥）" .-> A
     A -. "exemplar → trace_id" .-> TRACE[(Tempo trace 树)]
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    classDef data fill:#ccfbf1,stroke:#0d9488,color:#134e4a
+    class REQ start
+    class A,AB,ADB,B proc
+    class BIZ,TRACE data
 ```
 
 一次 A 调 B，被 OTel 自动埋点**同时**产出两样东西：一个 span（进 Tempo）和一组 RED 指标（进 VM，如 `http.client.request.duration`）。exemplar 就是 metric 数据点上的一个字段，指向同一次调用的那个 span。所以三者关系是：**同一次调用 → 产出一对（span + metric 点）→ exemplar 是 metric 点上指向 span 的指针**。exemplar 不创造新数据，它给"已存在的 metric 点"加一个 trace_id 指针。

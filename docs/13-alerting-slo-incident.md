@@ -12,6 +12,10 @@
 ```mermaid
 flowchart LR
     D[发现<br/>告警驱动] --> L[定位<br/>三支柱协同] --> S[止损<br/>优先恢复] --> R[恢复<br/>SLO 回归] --> P[复盘<br/>根因 + 整改]
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    class D,P start
+    class L,S,R proc
 ```
 
 ## 13.1 企业级告警标准化：分级、收敛、降噪、静默、闭环制度

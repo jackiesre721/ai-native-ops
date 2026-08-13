@@ -20,6 +20,14 @@ flowchart LR
     P1 -->|否| RB[自动回退]
     P2 -->|否| RB
     P3 -->|否| RB
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+    classDef danger fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
+    class S,E start
+    class W1,W2,W3,W4 proc
+    class P1,P2,P3 decision
+    class RB danger
 ```
 
 ## 11.1 生产变更核心风险：版本冲突、流量波动、隐性故障、环境不一致

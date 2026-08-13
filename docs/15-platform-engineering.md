@@ -12,6 +12,10 @@
 ```mermaid
 flowchart LR
     A[复杂基础设施] --> B[标准化 Platform API] --> C[业务黄金路径] --> D[研发自助服务] --> E[统一运行时规范]
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    class A,E start
+    class B,C,D proc
 ```
 
 ## 15.1 平台工程核心定位：不是搭建运维平台，而是屏蔽基础设施复杂度、统一生产运行标准

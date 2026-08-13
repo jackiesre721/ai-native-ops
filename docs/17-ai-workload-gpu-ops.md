@@ -13,6 +13,10 @@
 flowchart LR
     G[GPU 设备插件<br/>算力可见] --> P[算力池化<br/>独占 / MIG / 分片] --> S[精细化调度]
     S --> M[模型制品分发] --> I[推理服务] --> F[算力 FinOps]
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    class G,F start
+    class P,S,M,I proc
 ```
 
 ## 17.1 AI异构算力生产体系：GPU设备插件、算力池化、调度核心运维逻辑（不讲解CUDA、SM、NVLink等硬件底层原理）

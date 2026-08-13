@@ -57,6 +57,12 @@ flowchart LR
     GIT -->|pull| ARG[ArgoCD controller<br/>集群内]
     ARG -->|reconcile 同步| CL[集群实际状态]
     ARG -.->|持续校验偏离| CL
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    classDef data fill:#ccfbf1,stroke:#0d9488,color:#134e4a
+    class CI,ARG start
+    class REG,GIT data
+    class CL proc
 ```
 
 - 真相源：chart-root 仓库（部署清单 + values），GitOps 拉取对象。

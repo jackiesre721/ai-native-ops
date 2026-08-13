@@ -112,6 +112,12 @@ flowchart LR
     A[实际状态 Actual] --> C
     C -->|偏离则纠正| ACT[调谐动作]
     ACT --> A
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+    class D start
+    class C decision
+    class A,ACT proc
 ```
 
 | 要素 | 作用 | 权衡 |

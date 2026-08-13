@@ -13,6 +13,10 @@
 flowchart LR
     T[训练] --> A[模型归档] --> R[模型仓库] --> D[服务部署] --> I[在线推理]
     I --> S[弹性扩缩] --> O[可观测治理] --> F[故障处置] --> C[成本管控] --> U[智能自治]
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    class T,U start
+    class A,R,D,I,S,O,F,C proc
 ```
 
 ## 3.1 云原生与AI原生运维的边界划分与协同关系

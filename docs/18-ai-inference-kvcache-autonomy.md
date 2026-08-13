@@ -172,6 +172,12 @@ flowchart LR
     P -.- P1[TTFT 首 Token]
     K -.- K1[KV 命中率]
     D -.- D1[TPOT / Token 吞吐]
+    classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
+    classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
+    classDef metric fill:#fef3c7,stroke:#d97706,color:#78350f
+    class R,Resp start
+    class Q,P,K,D proc
+    class Q1,P1,K1,D1 metric
 ```
 
 ### 生产问题
