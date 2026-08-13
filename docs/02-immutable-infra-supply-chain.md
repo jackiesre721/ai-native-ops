@@ -191,10 +191,14 @@
 
 ### 最小可行方案
 
-最小安全构建模板（多阶段 + 精简基础 + 可复现）：
+最小安全构建模板（多阶段 + 精简基础选型 + 可复现）：
 
 1. **多阶段**：builder 阶段编译，runtime 阶段只 `COPY --from=builder` 产物。
-2. **精简基础**：runtime 用 distroless 或 alpine，不含 shell 和编译工具。
+2. **精简基础镜像选型**（按"小 vs 兼容"取舍）：
+   - **distroless**：最小、无 shell、攻击面最小 → 生产首选，调试用 ephemeral container；
+   - **alpine**：小、有 shell，但 musl libc 可能让部分依赖不兼容 → 兼容性允许时用；
+   - **slim（如 debian-slim）**：兼容性好、体积稍大 → 依赖复杂、distroless 跑不通时兜底。
+   - 选型：优先 distroless，遇兼容性退 alpine，再不行 slim——越精简越好，但不以牺牲兼容性为代价。
 3. **版本锁定**：基础镜像和依赖都用明确版本/digest，构建可复现。
 4. **secrets 外置**：构建期用 CI secret 注入，绝不 COPY 进镜像层。
 
