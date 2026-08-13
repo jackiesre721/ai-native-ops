@@ -34,14 +34,14 @@
 | 层级 | 闭环 | 信号 | 决策频率 | 校验 | 承接 |
 |---|---|---|---|---|---|
 | **L1 机械自治（控制理论的"闭环控制"）** | 期望→调谐→实际 | 资源状态 | 秒级 | 资源收敛 | 第 5 章 |
-| **L2 运维自治（传统可观测性 + 自动化运维）** | 观测→识别→处置→校验 | SLO/错误预算/业务指标 | 分钟级 | SLO 恢复 | 本章 |
+| **L2 运维自治（传统可观测性 + 自动化运维）** | 监控感知→风险预判→自动处置→结果校验→复盘迭代 | SLO/错误预算/业务指标 | 分钟级 | SLO 恢复 | 本章 |
 | **L3 智能自治（基于 AI Agent 的认知智能）** | 观测→推理→决策→执行→校验→反馈 | 推理性能/KV 缓存/算力动态 | 动态自适应 | 性能反馈 | 第 18 章 |
 
 权衡的核心（与 1.5 节呼应）：**每升一层，决策复杂度与风险上升一层，必须用更严格的校验对冲**——L1 靠调谐（确定性），L2 靠 SLO 校验（可量化），L3 靠性能反馈（自适应）。上层依赖下层可信基础，不可跳级。
 
 > **全书总图**：三层自治如何落在十三步业务闭环上、每步属 L1/L2/L3 哪一层，见 README「全书总图：业务闭环 × 三层自治」一表——两条主线在那张图里一图叠合。
 
-> **关于 L2 闭环步数**：同一闭环在全书有三种粒度表达——README/CONVENTIONS 压缩为 3 步（观测风险 → 决策处置 → 结果校验）、本表展开为 4 步（观测 → 识别 → 处置 → 校验）、16.4 落地为 5 步（监控感知 → 风险预判 → 自动处置 → 结果校验 → 复盘迭代）。三者是同一闭环由粗到细的展开，非矛盾。
+> **关于 L2 闭环步数**：L2 闭环全书统一为 5 步（监控感知 → 风险预判 → 自动处置 → 结果校验 → 复盘迭代），本表定义与 16.4 落地一致；README/CONVENTIONS 的 3 步（观测风险 → 决策处置 → 结果校验）是概述层的压缩表达，非另一套闭环。
 
 ### 最小可行方案
 
@@ -208,6 +208,29 @@ KEDA 分层弹性最小落地：
 - 网关：KEDA 接请求速率，流量涨自动扩。
 - 推理服务：KEDA 接 Token 吞吐/队列（第 18 章详细），负载涨自动扩。
 - 与 HPA 解耦：CPU 密集服务继续 HPA，业务瓶颈服务用 KEDA。
+
+可复制的 KEDA ScaledObject（Kafka 队列积压驱动，背后由 KEDA 托管一个 HPA 对象）：
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata: { name: consumer-scaler, namespace: order }
+spec:
+  scaleTargetRef: { name: order-consumer }   # 要扩缩的 Deployment
+  minReplicaCount: 2      # 兜底，避免 scale-to-zero 冷启动（只有批处理才设 0）
+  maxReplicaCount: 20     # 上限，防失控扩容烧资源
+  pollingInterval: 30     # 秒，多久看一次指标（突发场景调到 10–15）
+  cooldownPeriod: 300     # 缩容冷却，防副本数震荡
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka:9092
+      consumerGroup: order-consumers
+      topic: orders
+      lagThreshold: "1000"   # 单分区积压超 1000 即扩；按 消费速率×SLA 反推
+```
+
+> **技术澄清（HPA vs KEDA）**：HPA 原生就支持 custom/external metrics（经 metrics adapter，如 Prometheus Adapter），并非"只懂 CPU"；而 **KEDA 在 K8s 模式下，本身就是在背后创建并托管一个 HPA 对象**——KEDA 是"更好的指标适配器 + 触发器控制器"，不是 HPA 之外的另一套并行机制。本节"L1 HPA / L2 KEDA"是**治理层面的概念划分**（原生 CPU 弹性 vs 业务指标弹性），非组件实现上的物理隔离。
 
 ### 典型故障案例
 

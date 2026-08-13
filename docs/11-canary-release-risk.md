@@ -200,6 +200,44 @@ Argo Rollouts 把灰度变成**声明式的发布自治**：**Rollout 声明金�
 - 回滚：分析失败 → Rollout 自动回退到 stable，无需人工。
 - 边界：阈值基于历史基线（非随意设），避免正常波动触发误回退。
 
+可复制的 Rollout 金丝雀（流量阶梯 + 每步挂分析，超阈值自动回退）：
+
+```yaml
+strategy:
+  canary:
+    steps:
+    - setWeight: 5              # 先 5% 流量到 canary
+    - pause: { duration: 5m }   # 观测窗口
+    - analysis:                 # 挂 SLO 分析，失败即回退，不进下一步
+        templates: [ { templateName: success-rate } ]
+    - setWeight: 25
+    - pause: { duration: 5m }
+    - analysis: { templates: [ { templateName: success-rate } ] }
+    - setWeight: 50
+    - pause: { duration: 10m }
+    - setWeight: 100
+```
+
+配套的 AnalysisTemplate（查 VictoriaMetrics 成功率，< 99% 判失败）：
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata: { name: success-rate }
+spec:
+  args: [ { name: service } ]
+  metrics:
+  - name: success-rate
+    interval: 1m
+    successCondition: result[0] >= 0.99   # 阈值用历史基线，勿拍脑袋
+    provider:
+      prometheus:
+        address: http://vmsingle-vm:8429   # VictoriaMetrics 查询地址
+        query: |
+          sum(rate(http_requests_total{service="{{args.service}}",code!~"5.."}[2m]))
+          / sum(rate(http_requests_total{service="{{args.service}}"}[2m]))
+```
+
 ### 典型故障案例
 
 团队金丝雀靠人盯，凌晨发布值班睡着，灰度版错误率飙升 2 小时未回退，影响扩大。配自动熔断 + 回滚后，错误率超阈值 1 分钟内自动回退。

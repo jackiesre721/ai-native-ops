@@ -50,6 +50,25 @@
 - 崩溃定位：CrashLoopBackOff → 看日志（代码/依赖）→ 看 events（探针/调度）→ 看资源（OOM）。
 - OOM 定位：`OOMKilled` 状态 + 内存 limit 调优。
 
+可复制的三探针配置（慢启动服务用 startup 保护启动期，liveness/readiness 分管"死活"与"就绪"）：
+
+```yaml
+livenessProbe:                 # 管"死没死"，失败→重启
+  httpGet: { path: /healthz, port: 8080 }
+  periodSeconds: 10
+  failureThreshold: 3          # 连续 3 次(30s)才重启，过滤瞬时抖动
+readinessProbe:                # 管"能不能接流量"，失败→只摘流量，不重启
+  httpGet: { path: /ready, port: 8080 }
+  periodSeconds: 5
+  failureThreshold: 3
+startupProbe:                  # 慢启动服务必配：成功前 liveness 暂停，避免启动期被误杀
+  httpGet: { path: /healthz, port: 8080 }
+  periodSeconds: 10
+  failureThreshold: 30         # 启动预算 = 10 × 30 = 300s
+```
+
+**经验公式**：`startup 启动预算 = periodSeconds × failureThreshold`，要 ≥ 服务真实最长启动时间（留 ~20% 余量）。一旦配了 startup，liveness 的 `initialDelaySeconds` 可设 0（启动保护交给 startup）；没配 startup 的老服务，liveness `initialDelaySeconds` 必须 ≥ 启动时间，否则启动期被当死进程杀掉。
+
 ### 典型故障案例
 
 某 Java 服务启动需 90 秒，liveness 探针 60 秒就触发重启，陷入无限重启循环。加 startup 探针（保护启动期）后，liveness 在 startup 成功后才生效，服务正常启动。

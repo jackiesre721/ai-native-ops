@@ -41,6 +41,8 @@
 
 `/metrics` 里那个 exemplar，是生产侧在造指标时盖的戳；vmagent 按 PodMonitor 去 `/metrics` 拉，把指标 + exemplar 一起拉回来。**PodMonitor 不增加，exemplar 也不增加采集链路**，采集只是把生产侧盖好的戳搬运回来。
 
+> **前提条件（非无条件打通）**：exemplar 这条链路成立需要三处同时支持——① 应用侧客户端开 exemplar 注入（OTel SDK / 新版 prometheus client）；② vmagent 版本支持 exemplar 采集与 remote-write 透传（VictoriaMetrics 需较新版本）；③ Grafana 开 exemplar 渲染。任一环节版本过旧或未开启，exemplar 都拿不到——这是版本/实现前提，不是协议天然免费。
+
 **事实二：trace 和 metric 是同一次调用的两个产物，exemplar 是把它们粘起来的桥。**
 
 一次 A 调 B，被 OTel 自动埋点**同时**产出两样东西：一个 span（进 Tempo）和一组 RED 指标（进 VM，如 `http.client.request.duration`）。exemplar 就是 metric 数据点上的一个字段，指向同一次调用的那个 span。所以三者关系是：**同一次调用 → 产出一对（span + metric 点）→ exemplar 是 metric 点上指向 span 的指针**。exemplar 不创造新数据，它给"已存在的 metric 点"加一个 trace_id 指针。
