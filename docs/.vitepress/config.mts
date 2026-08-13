@@ -46,7 +46,8 @@ export default withMermaid(
           items: [
             { text: '目录与阅读路径', link: '/README' },
             { text: '写作规范（V1.0 冻结规则）', link: '/CONVENTIONS' },
-            { text: '生产检查清单速查', link: '/CHECKLIST' }
+            { text: '生产检查清单速查', link: '/CHECKLIST' },
+            { text: '参考文献与深读', link: '/REFERENCES' }
           ]
         },
         {
