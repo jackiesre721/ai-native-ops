@@ -11,13 +11,12 @@
 
 ```mermaid
 flowchart LR
-    G1["第一代<br/>被动救火<br/>人 = 回路"] -->|声明式 + 控制循环| G2["第二代<br/>云原生自动化<br/>稳态自愈"]
-    G2 -->|观测驱动决策| G3["第三代<br/>AI 原生自治<br/>动态自适应"]
+    G1["第一代 · 被动救火<br/>人 = 回路"] --> G2["第二代 · 云原生自动化<br/>声明式 + 控制循环"]
+    G2 --> G3["第三代 · AI 原生自治<br/>观测驱动决策"]
     classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
     classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
-    class G1 start
+    class G1,G3 start
     class G2 proc
-    class G3 start
 ```
 
 ## 1.1 运维三代范式核心跃迁：被动救火运维 → 云原生自动化运维 → AI原生智能自治运维

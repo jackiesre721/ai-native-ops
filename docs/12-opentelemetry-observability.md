@@ -52,8 +52,8 @@ flowchart TB
     A --> AB["A→B 调用 span"]
     A --> ADB["A→DB span"]
     AB --> B["B server span"]
-    BIZ[业务指标<br/>order_total] -. "时间对齐<br/>（RED 桥）" .-> A
-    A -. "exemplar → trace_id" .-> TRACE[(Tempo trace 树)]
+    BIZ[业务指标<br/>order_total] -. 时间对齐 .-> A
+    A -. exemplar .-> TRACE[(Tempo trace 树)]
     classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
     classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
     classDef data fill:#ccfbf1,stroke:#0d9488,color:#134e4a
