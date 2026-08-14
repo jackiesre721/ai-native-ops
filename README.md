@@ -24,7 +24,7 @@
 | 第六篇 AI 原生运维 | 第 17–18 章 | 异构算力 / 推理性能 / 智能自治 |
 | 附录 | A / B | 安全基线 / 五大故障案例 |
 
-技术栈锁死：VictoriaMetrics / Loki / Tempo / OpenTelemetry / Grafana + Helm / ArgoCD / Argo Rollouts + vLLM / SGLang。
+技术栈锁死（双层参考栈）：**基础设施层 = 云托管生态（阿里云 ACK 主参考、AWS EKS 对照，不自建 K8s）** + 平台层自建栈：VictoriaMetrics / Loki / Tempo / OpenTelemetry / Grafana + Helm / ArgoCD / Argo Rollouts + vLLM / SGLang。写作铁律见 `docs/CONVENTIONS.md`（V1.1：每节落地三件套——可运行制品/云服务映射/数字）。
 
 ## 本地预览
 

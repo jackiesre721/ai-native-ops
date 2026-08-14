@@ -1,311 +1,640 @@
 # 第8章 Kubernetes网络、存储与服务治理
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（严控容灾边界） ｜ 状态：终审中 -->
 
-> 本章定位：讲清集群网络、流量网关、存储生命周期与生产容灾极简规范。容灾只到 RPO/RTO 定义与落地原则，不展开深度 DR 工具。
+> 本章定位：讲清托管 K8s（阿里云 ACK 主参考、AWS EKS 对照）的网络、流量入口、存储生命周期与生产容灾极简规范——云 CNI（Terway/VPC-CNI）、SLB/NLB/ALB 流量网关、云盘/NAS/OSS 三种存储、云盘快照与 RPO/RTO 落地。容灾只到快照 + 指标 + 演练原则，深度 DR 归 V2。
 
-> **边界声明**：本章不展开深度服务网格（Linkerd/Istio 全生态）、不展开深度 DR 工具（Velero 等）、不展开多云多地域。以上统一归 V2。
+> **边界声明**：本章不讲自建 CNI（Flannel/Calico）与自建存储；不展开深度服务网格（Istio/Linkerd 全生态）、不展开深度 DR（跨集群/多云容灾）。以上统一归 V2。
 
 ---
 
 ## 8.1 集群基础网络通信原理、主流CNI选型与生产运维规范
+<!-- 云 CNI 视角：Terway 让 Pod 直通 VPC。运维对象不再是封装协议，而是 vSwitch IP 容量、ENI/IP 配额、安全组与 terway-eniip 组件日志四件事。 -->
 
 ### 生产问题
 
-集群网络时好时坏：跨节点 Pod 通信偶发超时、网络插件节点间路由不一致、某次 CNI 升级导致全集群网络中断半小时。**网络是 K8s 的血管，血管一出问题全身停摆，但 CNI 的内部机制对运维是个黑盒**，出问题只能重启 CNI 碰运气。
+跨节点 Pod 偶发超时，团队按自建集群老手册去查 Flannel/Calico 的封装与节点路由——托管集群里根本没有它们，越排越远。**云 CNI 时代的故障换了发源地：vSwitch IP 耗尽、节点 ENI/IP 配额打满、安全组没放行对端**，表现却是最会伪装的"Pod 拿不到 IP 一直 Pending"或"跨节点不通"。
 
 ### 传统方案失效原因
 
-- **不理解 Pod 网络通信模型**：不知道 Pod 间如何跨节点通信（overlay/underlay），排查无方向。
-- **CNI 选型盲目**：跟风选 CNI，不考虑规模/性能/运维适配，后期踩坑。
-- **CNI 运维黑盒**：不监控 CNI 组件健康，IPAM 耗尽、节点路由错乱等问题不可见。
-- **升级无预案**：CNI 升级直接全量，无灰度，出事全集群断网。
+- **自建视角错位**：背 overlay/underlay 封装原理，不会查 Terway 日志与 VPC 配额（4.2 同病）。
+- **IPAM 无容量规划**：Pod 直通 VPC = 每 Pod 吃一个 vSwitch IP，不规划网段，扩容即耗尽；NetworkPolicy 想当然——Terway 默认未开启，策略写了不生效。
 
-失效根因：**把 CNI 当"装上就行"的插件，不当需要运维治理的核心组件**。网络不可观测、不可控，必然出事抓瞎。
+定论，不再论证：**云 CNI 是要容量规划与健康观测的核心组件，不是"装上就行"的插件**。
 
 ### 架构约束与权衡
 
-CNI 选型与运维的约束：
+全书只讲云 CNI：阿里云 **Terway**（Pod 直通 VPC，主参考）、AWS **VPC-CNI**（对照）。Terway 的 ENI 多 IP 模式两种形态对比：
 
-| 维度 | 考量 | 权衡 |
+| 对比项 | 共享 ENI 多 IP（默认） | 主 ENI 多 IP |
 |---|---|---|
-| **通信模型** | overlay（封装，如 VXLAN）/ underlay（底层路由）/ 直连 | overlay 简单有开销；underlay 高性能复杂 |
-| **性能** | 吞吐/延迟/封解开销 | 性能 vs 运维复杂度 |
-| **IPAM** | IP 分配策略（按节点段/动态） | 规模化 IP 耗尽风险 |
-| **运维性** | 可观测性/升级方式/故障排查 | 易运维 vs 功能强 |
+| **IP 来源** | Terway 在节点上挂辅助 ENI，Pod 用其辅助 IP | 直接用 ECS 主网卡的辅助 IP |
+| **数据面** | Veth pair + 策略路由 | IPVLAN 子接口，性能更好 |
+| **Pod 密度** | 高：`(ENI 数 − 1) × 单 ENI 私有 IP 数` | 低：仅主 ENI 的 IP 配额（以实例规格文档为准） |
+| **NetworkPolicy** | 支持（需显式开启） | 支持（需显式开启） |
 
-权衡的核心：**CNI 选型是性能、复杂度、运维性的三角权衡**。没有最优解，按集群规模/性能要求/团队能力选。托管 K8s 通常有默认 CNI，自建需谨慎选。
+- 对照 AWS：VPC-CNI 同为 Pod 直通 VPC，Pod 密度 ≈ ENI 数 ×（单 ENI IPv4 数 − 1）+ 2（如 m5.large = 3×9+2 = 29，以实例规格文档为准）。
+- **为什么不自建 Flannel/Calico**：封包开销、节点路由与 NetworkPolicy 后端全自管，且失去 SLB 直通 Pod 等云集成——托管主栈下不采用，仅此一句（独占 ENI 模式性能最佳但密度最低，仅网络敏感场景按节点池开启）。
+
+权衡的核心：**密度与性能二选一，多数集群选共享 ENI 多 IP；要规划的不是"CNI 品牌"，而是 vSwitch 网段容量**。
 
 ### 最小可行方案
 
-CNI 先做选型（通信模型决定性能/复杂度权衡），再定运维规范：
-
-- **overlay（封装，如 VXLAN）**：通用、跨环境简单，有封解开销 → 多数集群默认。
-- **underlay（底层路由）/ 直连**：高性能、低开销，需底层网络配合 → 性能敏感场景。
-- **选型判断**：通用优先 overlay；对吞吐/延迟极敏感且有底层网络条件 → underlay。定下模型后的运维规范：
-
-1. **理解通信模型**：搞清本集群 CNI 是 overlay/underlay，Pod 跨节点怎么走。
-2. **监控 CNI 健康**：CNI pod 状态、IPAM 用量、节点路由纳入观测（第 12 章）。
-3. **升级灰度**：CNI 升级分批/灰度，不全量。
-4. **IPAM 容量规划**：按规模预留 IP 段，监控 IP 耗尽风险。
+1. **用共享 ENI 多 IP**（ACK 默认），按 Pod 规模规划 vSwitch（落地实现②）。
+2. **开启 NetworkPolicy**：改 eni-config 重启 Terway 生效；策略先默认拒绝再白名单（附录 A.2）。
+3. **观测三件套 + 升级灰度**：terway-eniip 健康、vSwitch 剩余 IP、跨节点连通性（第 12 章）；Terway 先单节点池验证再全量。
 
 ### 生产落地实现
 
-- 通信模型：overlay（VXLAN）通用简单；高性能场景 underlay 或直连路由。
-- 监控：CNI 组件健康 + IPAM 分配率 + 跨节点连通性探测。
-- 升级：分批 drain 节点升级 CNI，保留回滚能力。
-- IPAM：按节点规模配 IP 段，监控分配率告警。
+**① Terway 开启 NetworkPolicy**（默认关闭，是"策略不生效"的头号原因）：
+
+```bash
+kubectl -n kube-system edit cm eni-config          # eni_conf 中 disable_network_policy: "false"（字段名随版本略有差异，以官方文档为准）
+kubectl -n kube-system rollout restart ds terway-eniip   # 重启组件生效
+```
+
+最小策略 = 默认拒绝（白名单放行的完整策略集顺接附录 A.2）：
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: prod
+spec:
+  podSelector: {}                 # 作用于命名空间内全部 Pod
+  policyTypes: [Ingress]          # 无 ingress 规则 = 拒绝所有入站
+```
+
+**② Pod 密度与 vSwitch 容量算例（容量规划核心数字）**：单节点 Pod 上限由实例规格决定——`ecs.g7.4xlarge` = 8 ENI × 单 ENI 30 私有 IP → (8−1)×30 = **210 Pod/节点**（官方示例值，以实例规格文档为准）。vSwitch 网段：20 台满配 = 4,200 个 Pod IP → 至少 **/19**（约 8,190 可用）；常见 /24（254 个）只够半台节点。IP 不够时扩网段或开 IP 前缀模式；对照 AWS 同样按实例配额查表（ENI × 单 ENI IP），另受节点 `--max-pods` 限制。
+
+**③ 排障制品：Pod 无 IP / 跨节点不通分层定位**：
+
+```bash
+# 1) Pod 是否拿到 IP（IP 列空白 = CNI/IPAM 层，不是应用层）
+kubectl get pod <pod> -o wide
+kubectl describe pod <pod> | sed -n '/Events:/,$p'
+# 2) vSwitch 剩余 IP（Pod 拿不到 IP 的头号原因）
+aliyun vpc DescribeVSwitchAttributes --VSwitchId vsw-xxx | jq .AvailableIpAddressCount
+# 3) Terway 组件日志（kube-system 的 terway-eniip，按目标节点定位）→ 4) 跨节点不通查节点安全组是否放行对端 Pod 网段/节点段
+kubectl -n kube-system get pods -o wide | grep terway
+kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE 'error|alloc|ip'
+```
+
+云服务映射：本节能力落在 **Terway + VPC（vSwitch/安全组）**，对照 **AWS VPC-CNI + VPC**——排障入口都是"云配额 → 组件日志"，不是自建 overlay 的节点路由表。
 
 ### 典型故障案例
 
-某集群 IPAM IP 耗尽，新 Pod 拿不到 IP 一直 Pending，但表现为"调度成功起不来"，排查很久才定位是网络层 IP 耗尽。监控 IPAM 分配率后，提前扩 IP 段，问题前置消除。
+夜间扩容后新 Pod 批量 Pending，`describe` 显示调度成功但 IP 列空白。分层定位：第 1 层确认无 IP → 第 2 层查出 vSwitch 剩余 IP 为 0（/24 的 254 个早已用完）→ 扩网段恢复，全程 12 分钟；此前同类故障被当"调度器问题"排了两小时。
 
-点评：**网络故障常伪装成其他故障**（Pod Pending、超时），不懂网络层就会误判。
+点评：**云 CNI 的故障常伪装成调度/应用故障**，分层定位比经验直觉快一个数量级。
 
 ### 根因定位
 
-根因不在某次 IP 耗尽，而在**CNI 不可观测不可控**。网络是底层依赖，不可观测就只能在故障里打转。
+问题的真正发源地是**用自建 overlay 的心智运维云 CNI**——容量账本只盯"每节点 Pod 数"，没人盯"vSwitch 总 IP 池"，网络资源账缺位，耗尽只是时间问题。
 
 ### 长效治理方案
 
-- 理解集群 CNI 通信模型。
-- CNI 健康 + IPAM + 连通性纳入观测。
-- CNI 升级灰度 + 回滚预案。
-- IPAM 容量规划 + 耗尽告警。
+- vSwitch IP 池纳入容量规划：剩余 <20% 告警（第 12 章），扩容前先核网段。
+- Terway 健康 + IP 用量 + 连通性探测纳入观测；升级走节点池灰度（4.4 节奏）。
+- NetworkPolicy 默认拒绝为上线基线（附录 A.2），策略集随应用清单走 Git。
 
 ### 自动化/自治闭环
 
-网络是机械自治的**通信基础**：**控制循环（第 5 章）的调度、自愈都依赖 Pod 网络可达**。网络层不可靠，机械自治的自愈动作（重调度 Pod）也跑不通。CNI 可靠可观测，是机械自治在分布式层面运转的前提。
+本节为 L1 机械自治的通信前提：第 5 章控制循环的调度与自愈都依赖 Pod 网络可达——网络层可观测，自治才不会把 Pod 调到拿不到 IP 的节点上。
 
 ### 生产检查清单
 
-- [ ] 是否理解本集群 CNI 通信模型（overlay/underlay）？
-- [ ] CNI 健康/IPAM 用量/连通性是否纳入观测？
-- [ ] CNI 升级是否灰度 + 有回滚预案？
-- [ ] IPAM 是否有容量规划 + 耗尽告警？
-- [ ] 网络故障是否纳入排查路径（避免误判为其他层）？
+- [ ] 集群 CNI 为云 CNI（Terway / VPC-CNI），无自建 Flannel/Calico？
+- [ ] Terway NetworkPolicy 已开启且默认拒绝策略上线（附录 A.2）？
+- [ ] vSwitch 网段按 Pod 总量规划、剩余 <20% 有告警，分层定位命令团队会用？
+- [ ] Terway 升级有节点池级灰度预案？
 
 ---
 
 ## 8.2 Service四层、Ingress七层网关流量管控、路由治理与生产最佳实践
+<!-- 托管 K8s 视角：Service LoadBalancer 由 CCM 落成 SLB/NLB，七层统一走 ALB Ingress。治理对象从"装控制器"变成"注解参数、证书托管、暴露面管控"。 -->
 
 ### 生产问题
 
-流量治理混乱：Service 类型乱用（LoadBalancer 满天飞，公网暴露失控）、Ingress 路由规则冲突、TLS 证书管理散乱、流量切分/限流没有统一方案。**流量入口是系统的门面，治理混乱既影响稳定性（路由冲突）又影响安全（公网暴露失控）**。
+数一遍集群里的公网 LoadBalancer：47 个 Service = 47 份 LB 实例费 + 47 个公网暴露面，其中 9 个没人认领；对外域名的 TLS 证书散在 4 个团队手里，任何一张过期都是入口级故障。**流量入口失控是双重账单——安全账（暴露面）+ 稳定账（路由与证书）**。
 
 ### 传统方案失效原因
 
-- **Service 类型乱用**：该用 ClusterIP 内部的用了 LoadBalancer，公网暴露面失控。
-- **Ingress 规则无治理**：多团队各加路由，规则冲突、域名/TLS 管理散乱。
-- **TLS 管理手工**：证书手动申请/续期，过期导致服务中断。
-- **流量切分靠改 Service**：灰度/金丝雀靠手动改 Service selector，粗糙且危险（第 11 章讲专业方案）。
+- LoadBalancer 滥用：该走 ClusterIP/ALB 的直接开公网 LB，费用与暴露面双输。
+- Ingress 路由多团队各加各的，冲突无审计；证书手工上传手工续期。
+- 灰度靠手改 Service selector，粗糙且危险（第 11 章讲正确方案）。
 
-失效根因：**流量入口没有统一治理规范**。Service/Ingress 各团队各搞各的，路由/证书/暴露面失控。
+定论，不再论证：**公网入口必须收口到统一网关 + 证书托管自动续期**。
 
 ### 架构约束与权衡
 
-流量治理两层模型：
-
 | 层级 | 组件 | 职责 | 治理要点 |
 |---|---|---|---|
-| **四层（Service）** | Service + kube-proxy | 负载均衡到 Pod | 类型选型、公网暴露管控 |
-| **七层（Ingress）** | Ingress + Ingress Controller | HTTP/HTTPS 路由、TLS、虚拟主机 | 路由规则治理、TLS 自动化 |
+| **四层（Service）** | Service + CCM → SLB/NLB | IP/端口负载均衡 | 注解参数、删除保护、暴露面审批 |
+| **七层（Ingress）** | ALB Ingress → ALB | HTTP(S) 路由、TLS、虚拟主机 | IngressClass 集中治理、证书托管 |
 
-权衡的核心：**四层简单但只懂 IP/端口，七层智能（路由/TLS）但引入控制器复杂度**。生产通常四层做内部负载均衡，七层做统一入口与路由治理。
+四层/七层选型一行判断：**HTTP(S) 路由/TLS/路径域名治理 → ALB；裸 TCP/UDP、超低延迟 → NLB**（经典 CLB 仅存量兼容）。权衡的核心：四层简单可控但只懂 IP/端口，七层智能但多一层控制器——生产用"七层收口 + 四层点对点"。
 
 ### 最小可行方案
 
-流量入口先做四层/七层选型（按"管什么"分），再定治理规范：
-
-| 入口 | 管什么 | 适合 | 选错 / 滥用 |
-|---|---|---|---|
-| **Service（四层）** ClusterIP/LB | IP + 端口 | 内部互访、裸 TCP、非 HTTP | 该走七层的硬塞 Service = 路由能力缺失 |
-| **Ingress（七层）** | HTTP 路由 / TLS / 虚拟主机 | 对外 Web 统一入口 | 该四层的硬上 Ingress = 多余复杂 |
-
-**选型判断**：内部服务互访 → Service(ClusterIP)；对外 Web → Ingress 统一入口 + TLS 自动化（cert-manager）；裸 TCP/非 HTTP → Service(LB) 受控暴露。规范底线：公网暴露受控（不滥用 LB）、TLS 全自动、灰度切分走专业方案（第 11 章）不手改 Service。
+内部互访 → ClusterIP（默认）；对外 Web → ALB Ingress 统一入口 + TLS；裸 TCP/UDP → Service(LoadBalancer)→NLB 受控暴露。规范底线：公网入口只经 ALB/NLB 且必开删除保护；证书统一托管云证书服务自动续期；灰度走 Argo Rollouts（第 11 章）。
 
 ### 生产落地实现
 
-- Service：内部 ClusterIP，公网 LoadBalancer（受控 + 白名单/网络策略）。
-- Ingress：统一七层入口，路由规则集中、可审计。
-- TLS：cert-manager 自动签发/续期，过期自动告警。
-- 流量切分：Argo Rollouts 做金丝雀/蓝绿（第 11 章），精确流量切分。
+**① Service → SLB/NLB 注解全表**（前缀省略为 `service.beta.kubernetes.io/alibaba-cloud-loadbalancer-`）：
+
+| 注解后缀 | 示例值 | 说明 |
+|---|---|---|
+| `spec` / `address-type` | `"slb.s2.small"` / `"internet"` | CLB 规格（可调，按 QPS）/ 公网或私网 |
+| `delete-protection` / `modification-protection` | `"on"` / `"ConsoleProtection"` | 删除保护（生产禁改）/ 配置修改保护 |
+| `charge-type` / `bandwidth` | `"PayByTraffic"` / `"45"` | 计费方式 / 带宽峰值（默认 50） |
+| `protocol-port` / `cert-id` | `"https:443"` / `"${CERT_ID}"` | TLS 监听 / 证书 ID（先托管到云证书服务） |
+| `health-check-flag` / `health-check-type` | `"on"` / `"tcp"` | 健康检查开关 / 类型（tcp、http） |
+| `health-check-uri` / `health-check-connect-port` | `"/healthz"` / `"31000"` | HTTP 检查路径 / 检查端口 |
+| `health-check-interval` / `healthy-threshold` / `unhealthy-threshold` | `"3"` / `"3"` / `"3"` | 间隔（秒）/ 健康 / 不健康阈值 |
+
+**② NLB 生产 YAML**（新一代四层入口，须显式指定可用区与交换机）：
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcp-gateway
+  annotations:
+    service.beta.kubernetes.io/alibaba-cloud-loadbalancer-zone-maps: "cn-hangzhou-h:vsw-aaa,cn-hangzhou-i:vsw-bbb"  # 可调：可用区:交换机，至少两个 AZ
+    service.beta.kubernetes.io/alibaba-cloud-loadbalancer-delete-protection: "on"    # 生产禁改：防误删
+    service.beta.kubernetes.io/alibaba-cloud-loadbalancer-health-check-flag: "on"
+    service.beta.kubernetes.io/alibaba-cloud-loadbalancer-protocol-port: "tcpssl:443" # 可调：需要 TLS 卸载时
+    service.beta.kubernetes.io/alibaba-cloud-loadbalancer-cert-id: "${CERT_ID}"
+spec:
+  loadBalancerClass: alibabacloud.com/nlb   # 指定 NLB（K8s ≥1.24 + 新版 CCM）
+  type: LoadBalancer
+  ports:
+  - port: 443
+    targetPort: 9443
+```
+
+> 旧版 CCM（K8s <1.24）用注解 `...loadbalancer-instance-type: "nlb"` 指定 NLB，键名随版本演进，以官方文档为准；NLB 实例费 + LCU 计费与 CLB 不同，切换前按官网当期价核算。
+
+**③ AWS NLB 对照**（EKS，等价注解换 aws-load-balancer 前缀）：
+
+```yaml
+# AWS EKS 注解对照（节选，其余字段同 ②）
+service.beta.kubernetes.io/aws-load-balancer-type: "nlb"                    # 指定 NLB
+service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"      # 可调：internal 为内网
+service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:xxx:123456789012:certificate/abc"  # ACM 证书
+```
+
+**④ ALB Ingress 三件套**（AlbConfig 声明实例 → IngressClass 绑定 → Ingress 声明路由）：
+
+```yaml
+apiVersion: alibabacloud.com/v1
+kind: AlbConfig
+metadata:
+  name: alb
+spec:
+  config:
+    name: prod-alb                       # 可调：ALB 实例名
+    addressType: Internet                # 可调：Intranet 为内网
+    zoneMappings:                         # 至少两个可用区各一个交换机
+    - zoneId: cn-hangzhou-h
+      vSwitchId: vsw-aaa
+    - zoneId: cn-hangzhou-i
+      vSwitchId: vsw-bbb
+  listeners:
+  - port: 443
+    protocol: HTTPS
+    certificates: [{certificateId: "${CERT_ID}"}]   # 证书托管云证书服务，续期自动生效
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+spec:
+  controller: ingress.k8s.alibabacloud/alb
+  parameters:
+    apiGroup: alibabacloud.com
+    kind: AlbConfig
+    name: alb
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-api
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: "/healthz"   # 与就绪探针同路径
+spec:
+  ingressClassName: alb
+  rules:
+  - host: api.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: demo-api
+            port:
+              number: 80
+```
+
+灰度：ALB Ingress 支持 `alb.ingress.kubernetes.io/canary-weight` 等注解做加权灰度，本书统一走 Argo Rollouts（第 11 章），此处不展开。
+
+**⑤ CCM 排障**（SLB/NLB 建不出来、注解不生效——复用 4.2 排障路径）：
+
+```bash
+kubectl -n kube-system get pods | grep -E 'ccm|alb'        # 云控制器是否健康（4.2）
+kubectl -n kube-system logs deploy/ccm --tail=50           # 失败原因（配额、权限、证书 ID 错）
+kubectl describe svc tcp-gateway                           # Events 看 CCM 回写状态
+```
+
+云服务映射：四层落在 **NLB/CLB（CCM 自动建）**，七层落在 **ALB + 云证书服务**，对照 **AWS NLB/ALB + ACM**。规模判断：入口 <10 个全托管省心；入口规模化后收口到 ALB（单 ALB 支撑数百条路由，费用以官网当期价为准）。
 
 ### 典型故障案例
 
-某 TLS 证书过期未续期，HTTPS 服务中断半天。根因是手工管理证书，过期没人发现。上 cert-manager 自动续期 + 过期告警后，再无证书过期事故。
+某对外服务 TLS 证书过期未续，HTTPS 中断半天——证书是三年前手工上传的，没人记得到期日。整改：证书统一托管云证书服务（自动续期），ALB 监听引用证书 ID，到期前 30 天告警（第 13 章通道），此后再无证书过期事故。
 
-点评：**手工管理证书 = 等着过期中断**。自动化是唯一可靠方案。
+点评：**手工管理证书 = 等着过期中断**，托管 + 自动续期是唯一可靠方案。
 
 ### 根因定位
 
-根因不在某次证书过期，而在**流量入口无统一治理**。路由/证书/暴露面各自为政，失控是必然。
+拆到底，是**入口治理的缺位**：注解、证书、暴露面分散在各团队 YAML 里，没有一张全公司唯一的入口台账——费用与风险都在没人看的地方累积。
 
 ### 长效治理方案
 
-- Service 类型规范化，公网暴露受控。
-- Ingress 统一入口，路由集中可审计。
-- TLS 全自动化签发/续期 + 过期告警。
-- 流量切分用专业方案（第 11 章）。
+- 入口台账唯一：每个公网入口有 owner、证书、暴露端口，季度审计清理无主入口。
+- 证书 100% 托管 + 自动续期 + 到期告警；Service/Ingress 模板化进基础 chart（第 10 章），灰度统一走 Argo Rollouts（第 11 章）。
 
 ### 自动化/自治闭环
 
-流量治理是机械自治的**对外接口层**：**Service/Ingress 让 Pod 的频繁起停扩缩（第 5 章机械自治）对调用方透明**——Pod 换了，Service 负载均衡自动指向新 Pod。没有稳定的流量入口抽象，机械自治的每次 Pod 变动都会传导为连接断裂。流量入口抽象，让自治动作对用户无感。
+本节是 L1 机械自治的对外接口层：Service/Ingress 让 Pod 的频繁起停与扩缩（第 5 章）对调用方透明——入口抽象稳定，自治动作才对用户无感。
 
 ### 生产检查清单
 
-- [ ] Service 类型是否规范（内部 ClusterIP，公网 LoadBalancer 受控）？
-- [ ] Ingress 是否统一七层入口、路由集中可审计？
-- [ ] TLS 是否全自动化签发/续期 + 过期告警？
-- [ ] 流量切分是否用专业方案（Argo Rollouts，第 11 章）？
-- [ ] 公网暴露面是否受控（无滥用 LoadBalancer）？
+- [ ] 公网入口只经 ALB/NLB，且删除保护为 on？
+- [ ] 证书统一托管 + 自动续期 + 到期前告警？
+- [ ] NLB 的 zone-maps 至少两个可用区？
+- [ ] IngressClass/AlbConfig 走 Git（第 10 章），CCM 排障路径（4.2）团队熟知？
 
 ---
 
 ## 8.3 StorageClass、PV/PVC生命周期管理、存储故障闭环处理
+<!-- 云存储视角：CSI 是云盘/NAS/OSS 进集群的门。三种 StorageClass + 拓扑感知绑定 + 快照恢复是主制品；PVC Pending 判定表与 csi-plugin 日志是排障主路径。 -->
 
 ### 生产问题
 
-有状态服务的存储频繁出问题：PVC 一直 Pending（StorageClass 配错/底层卷不可用）、Pod 起不来（卷挂载失败）、性能抖动（存储类型选错，IO 瓶颈）、扩容时数据一致性风险。**存储是有状态服务的命脉，存储故障往往导致数据风险，排查还慢**，是生产里最不能出错的层。
+发布夜 23:40，数据库滚动更新卡住：新 Pod 全部 ContainerCreating，PVC Pending 已 40 分钟——没人知道要去看 PVC 的 Events。**存储是有状态服务的命脉，而它的故障最会伪装（表现为 Pod 起不来）、排查路径最深（PVC → PV → CSI → 云盘）、出错代价最高（数据风险）**。
 
 ### 传统方案失效原因
 
-- **不理解 PV/PVC 生命周期**：动态/静态供给混淆，PVC Pending 不知查哪。
-- **StorageClass 选型盲目**：不看 IO 特性选存储类型，性能不达标。
-- **挂载故障无排查路径**：卷挂载失败只在 kubelet 日志，不看就找不到。
-- **数据一致性无保护**：扩容/迁移时无一致性保障，数据损坏风险。
+- 不掌握 PV/PVC 生命周期：动态供给、绑定、拓扑约束一片混沌，PVC Pending 只能干等；选型不看 IO 特性与可用区拓扑——PL 级别选错性能不达标，多 AZ 集群里卷与 Pod 拓扑冲突。
+- 挂载失败不看 csi-plugin 与 kubelet 日志，只在应用日志里打转。
 
-失效根因：**把存储当"挂上就行"，不掌握 PV/PVC 生命周期与存储故障排查**。存储层出错代价最高（数据风险），却最常被当黑盒。
+定论，不再论证：**存储层必须建立"选型 → 供给 → 排障"的工程化路径**。
 
 ### 架构约束与权衡
 
-存储生命周期治理：
+三种云存储的分工（阿里云主参考 / AWS 对照）：
 
-| 维度 | 治理要点 | 权衡 |
-|---|---|---|
-| **供给方式** | 动态供给（StorageClass 自动建 PV）vs 静态 | 动态省事，静态可控 |
-| **存储类型** | 块/文件/对象，按 IO 特性选 | 性能 vs 成本 |
-| **PVC 生命周期** | 绑定/扩容/回收策略（Retain/Recycle/Delete） | 数据安全 vs 自动化 |
-| **挂载排查** | kubelet/运行时日志 + PV/PVC 状态 | 故障可见性 |
+| 维度 | 云盘（块存储） | NAS（文件存储） | OSS（对象存储） |
+|---|---|---|---|
+| **语义** | 块设备，RWO 单 Pod 挂载 | NFS 共享文件系统，RWX 多 Pod 读写 | 对象桶，只读挂载为主 |
+| **拓扑** | **可用区级资源**，不能跨 AZ 挂载 | 地域级，跨 AZ 共享 | 地域级，跨 AZ 共享 |
+| **典型负载** | 数据库、消息队列 | 多 Pod 共享目录、训练 checkpoint | 模型只读分发（17.3）、备份归档 |
+| **AWS 对照** | EBS gp3 | FSx for Lustre / EFS | S3 Mountpoint |
 
-权衡的核心：**存储选型是性能、成本、数据安全的三角权衡**。块存储高性能高成本，对象存储低成本但非文件语义；回收策略 Retain 最安全但需人工清理。
+ESSD 性能级别速查（数字以官网为准）：
+
+| 性能级别 | 单盘容量区间 | 单盘最大 IOPS | 单盘最大吞吐 |
+|---|---|---|---|
+| PL0 | 40 GiB–32 TiB | 1 万 | 180 MB/s |
+| PL1（生产默认） | 20 GiB–32 TiB | 5 万 | 350 MB/s |
+| PL2 | 461 GiB–32 TiB | 10 万 | 750 MB/s |
+| PL3 | 1,261 GiB–32 TiB | 100 万 | 4,000 MB/s |
+
+> 对照 AWS：EBS gp3 单卷基线 3,000 IOPS / 125 MB/s，可付费配到 16,000 IOPS / 1,000 MB/s、单卷上限 16 TiB。
+
+权衡的核心：**性能、成本、数据安全的三角**——块存储高性能有拓扑约束，NAS 共享但吞吐随容量增长，OSS 最便宜但非文件语义。按负载选，不一刀切。
 
 ### 最小可行方案
 
-存储治理的最小规范：
-
-1. **动态供给为主**：StorageClass 自动建 PV，按需供给。
-2. **按 IO 选存储类型**：数据库用块存储（高性能），共享文件用文件存储，备份用对象存储。
-3. **回收策略 Retain**：生产 PVC 默认 Retain，防误删丢数据。
-4. **挂载故障排查路径**：PVC Pending → 查 StorageClass/底层卷；挂载失败 → 查 kubelet/运行时日志。
+1. **动态供给为主**：三种 StorageClass 作为平台基座，PVC 按需触发建卷。
+2. **按负载选型**：数据库 → 云盘 PL1；多 Pod 共享 → NAS 容量型；模型/备份 → OSS。
+3. **云盘必配 WaitForFirstConsumer**：卷跟随 Pod 调度建在同可用区（拓扑含义见①注释）；生产 PVC 回收策略一律 Retain，dev 集群才用 Delete。
 
 ### 生产落地实现
 
-- 动态供给：StorageClass 关联底层存储，PVC 自动触发 PV 创建。
-- 类型选型：数据库 = 块存储（高性能）；配置共享 = 文件存储；备份/模型 = 对象存储（第 17 章模型存储）。
-- 回收策略：生产 Retain（保护数据），dev 可 Delete。
-- 排查：`kubectl describe pvc` 看事件；挂载失败看 kubelet/运行时日志（第 6 章）。
+**① 云盘 StorageClass + PVC + 挂载**（数据库类负载）：
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: alicloud-disk-essd-pl1
+provisioner: diskplugin.csi.alibabacloud.com
+parameters:
+  type: cloud_essd               # ESSD 云盘；PL 级别由 performanceLevel 控制（键名以官方文档为准）
+  performanceLevel: PL1          # 可调：PL0 开发测试 / PL2、PL3 高性能（PL3 起步 1,261 GiB）
+  fstype: ext4                   # 可调：xfs 适合大容量高并发写
+reclaimPolicy: Retain            # 生产禁改：防误删丢数据
+allowVolumeExpansion: true       # 在线扩容：PVC 改 storage 即触发
+volumeBindingMode: WaitForFirstConsumer   # 生产禁改：等首个 Pod 调度后再建盘，保证云盘与 Pod 同可用区（云盘是 AZ 级资源，建错 AZ 只能重建）
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+spec:
+  accessModes: [ReadWriteOnce]   # 云盘仅单 Pod 挂载
+  storageClassName: alicloud-disk-essd-pl1
+  resources:
+    requests:
+      storage: 500Gi
+---
+# Pod 挂载片段（节选）
+    volumeMounts:
+    - name: data
+      mountPath: /var/lib/mysql
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: mysql-data
+```
+
+成本量级：500 GiB ESSD PL1 月成本约 ¥250–300（以官网当期价为准）；对照 gp3 同容量约 $40/月（以 AWS 当期价为准）。
+
+**② NAS StorageClass + 多 Pod 共享读写**：
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: alicloud-nas-capacity
+provisioner: nasplugin.csi.alibabacloud.com
+parameters:
+  volumeAs: subpath              # 在已有 NAS 文件系统下按 PVC 建子目录
+  server: "nas-xxxx.cn-hangzhou.nas.aliyuncs.com"   # 预创建的通用容量型 NAS 挂载点
+  archiveOnDelete: "true"        # 删 PVC 时归档子目录而非直接删除
+reclaimPolicy: Retain
+volumeBindingMode: Immediate     # NAS 无可用区拓扑，可立即绑定
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-workspace
+spec:
+  accessModes: [ReadWriteMany]   # NAS 支持 RWX：多 Pod 跨节点共享读写
+  storageClassName: alicloud-nas-capacity
+  resources:
+    requests:
+      storage: 1Ti               # 声明量用于配额规划，NAS 按实际用量计费
+```
+
+吞吐量级（通用容量型 NAS，以官网为准）：初始 150 MB/s、容量每 +1 GiB 吞吐 +0.15 MB/s，读上限 10 GB/s、写上限 5 GB/s；**单客户端（单 Pod）读写带宽上限 500 MB/s**——高吞吐靠多 Pod 并行，不靠单挂载点。
+
+**③ OSS StorageClass + 只读挂载模型文件**（AI 场景锚点，模型分发详见 17.3）：
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: alicloud-oss-readonly
+provisioner: ossplugin.csi.alibabacloud.com
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  bucket: "ml-models-prod"                   # 模型桶
+  url: "oss-cn-hangzhou.aliyuncs.com"        # OSS Endpoint
+  path: "/qwen2.5-7b"                        # 模型目录
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-weights
+spec:
+  accessModes: [ReadOnlyMany]    # 只读多点挂载：模型文件不可变（storage 声明仅占位）
+  storageClassName: alicloud-oss-readonly
+  resources:
+    requests:
+      storage: 16Gi
+---
+# Pod 挂载片段（完整 spec 从略）：vLLM/SGLang 推理容器只读挂载模型目录
+    volumeMounts:
+    - name: model
+      mountPath: /models
+      readOnly: true                         # 生产禁改：模型目录只读
+  volumes:
+  - name: model
+    persistentVolumeClaim:
+      claimName: model-weights
+```
+
+> OSS 挂载凭据：新版本 CSI 支持 RRSA/RAM 角色免密，旧版本经 Secret 传 akId/akSecret（以官方文档为准）——能走 RRSA 就不给长期 AK（4.2）。对照 AWS：`s3.csi.aws.com`（S3 Mountpoint），同样主打只读数据面分发。
+
+**④ 云盘快照：备份与恢复闭环**（接 8.4）：
+
+```yaml
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: alicloud-disk-snapshot
+driver: diskplugin.csi.alibabacloud.com
+deletionPolicy: Delete        # 可调：Retain 时快照不随 VolumeSnapshot 删除
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: mysql-data-20260814
+spec:
+  volumeSnapshotClassName: alicloud-disk-snapshot
+  source:
+    persistentVolumeClaimName: mysql-data   # 500GiB 卷打快照，分钟级（增量链）
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data-restored
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: alicloud-disk-essd-pl1
+  resources:
+    requests:
+      storage: 500Gi          # 不得小于快照源卷
+  dataSource:                 # 从快照建新卷：恢复/克隆的声明式路径
+    apiGroup: snapshot.storage.k8s.io
+    kind: VolumeSnapshot
+    name: mysql-data-20260814
+```
+
+**⑤ 存储排障：PVC Pending 判定表 + 挂载失败日志路径**：
+
+```bash
+kubectl get pvc mysql-data                          # Pending 是入口信号
+kubectl describe pvc mysql-data | sed -n '/Events:/,$p'
+kubectl -n kube-system get pods -o wide | grep csi-plugin          # 找目标节点上的 CSI 组件
+kubectl -n kube-system logs <csi-plugin-pod> -c csi-plugin --tail=100 | grep -iE 'error|fail|create'
+# 节点侧：kubelet/容器运行时日志（journalctl -u kubelet，第 6 章）
+```
+
+Events / 日志关键字 → 判定表（与 4.3 的 Pod Pending 判定表同风格）：
+
+| 关键字 | 判定 | 去向 |
+|---|---|---|
+| `volume node affinity conflict` | **拓扑冲突**：Pod 可调度的 AZ 与云盘 AZ 不相交（节点池不均 / 未拓扑打散） | 补节点池 AZ / 拓扑打散（第 7 章） |
+| `storageclass.storage.k8s.io "xxx" not found` | StorageClass 名或 provisioner 写错 | 核对 SC 名与 provisioner |
+| csi-plugin 日志 `InvalidDiskType` / 规格不支持 | 该 AZ 无此规格（PL3 起步 1,261 GiB、AZ 售罄） | 调 PL 级别或容量 / 换 AZ |
+| Events 长时间空白 | 未触发供给或 CSI 组件异常 | 查 csi-plugin Pod 状态与 volumeBindingMode |
+
+云服务映射：块/文件/对象分别落在**云盘 ESSD / NAS / OSS**（各 CSI 插件接入），对照 **EBS gp3 / FSx for Lustre / S3 Mountpoint**。规模判断：单卷 <32 TiB 且要块语义 → 云盘；跨节点共享 → NAS；海量只读与备份归档 → OSS（成本依次递减，以官网当期价为准）。
 
 ### 典型故障案例
 
-某数据库 PVC 一直 Pending，根因是 StorageClass 引用的底层存储类型在当前可用区不可用。改用跨可用区可用的 StorageClass 后，PVC 绑定成功。
+多 AZ 集群滚动更新数据库，新副本 PVC 一直 Pending。判定表走查：Events 写着 `volume node affinity conflict`——旧副本的云盘在 AZ-h，新 Pod 被调度到只有 AZ-i 节点的节点池。整改：节点池补齐两 AZ + StatefulSet 加拓扑打散（第 7 章）+ SC 保持 WaitForFirstConsumer，定位 3 分钟。
 
-点评：**PVC Pending 大多是 StorageClass/底层卷问题**，不看 PVC 事件就只能干等。
+点评：**PVC Pending 大多不是存储坏了，而是拓扑与供给参数错了**——不看 Events 就只能干等。
 
 ### 根因定位
 
-根因不在某次挂载失败，而在**不掌握 PV/PVC 生命周期与存储故障排查**。存储层黑盒，故障不可见不可控。
+根因不在某次挂载失败，而在**存储供给参数与拓扑约束从未被工程化**：StorageClass 是抄来的、拓扑语义没人懂、排障不看 Events——存储黑盒化后，每个故障都从零开始猜。
 
 ### 长效治理方案
 
-- 动态供给为主，按 IO 选存储类型。
-- 生产 PVC 回收策略 Retain（保护数据）。
-- 建立存储故障排查路径（PVC 事件 + kubelet/运行时日志）。
-- 存储性能/容量纳入观测（第 12 章）。
+- 三种 StorageClass 作为平台基座统一交付（基础 chart，第 10 章），业务只声明 PVC；卷使用率与 NAS 吞吐纳入观测（第 12 章）。
+- 云盘类负载强制 WaitForFirstConsumer + 多 AZ 节点池 + 拓扑打散；PVC Pending 判定表与 csi-plugin 日志路径进值班手册。
 
 ### 自动化/自治闭环
 
-存储治理是有状态负载机械自治的**数据基础**：**StatefulSet（第 7 章）+ PV/PVC 稳定绑定，让有状态服务也能享受机械自治（Pod 重建数据不丢）**。存储层可靠，有状态服务的自愈/扩缩才安全；存储层不可靠，有状态负载根本无法上机械自治。
+本节为有状态负载的 L1 机械自治提供数据基础：StatefulSet + PV 稳定绑定（第 7 章），Pod 重建数据不丢、快照让"重建"有回退点——存储层可靠，有状态服务的自愈与扩缩才安全。
 
 ### 生产检查清单
 
-- [ ] 是否以动态供给为主（StorageClass 自动建 PV）？
-- [ ] 存储类型是否按 IO 特性选型（块/文件/对象）？
-- [ ] 生产 PVC 回收策略是否 Retain（防误删）？
-- [ ] 是否有存储故障排查路径（PVC 事件 + kubelet 日志）？
-- [ ] 存储性能/容量是否纳入观测？
+- [ ] 三种 StorageClass 为平台基座，参数经评审？
+- [ ] 云盘 SC 为 WaitForFirstConsumer + Retain + 在线扩容开启？
+- [ ] 存储选型按负载（数据库云盘 / 共享 NAS / 只读 OSS）？
+- [ ] PVC Pending 判定表与 csi-plugin 日志路径在值班手册？
+- [ ] 卷使用率与 NAS 吞吐有观测告警，快照恢复演练过（VolumeSnapshot → 新卷走通）？
 
 ---
 
 ## 8.4 生产容灾极简规范：PV备份、恢复机制、RPO/RTO指标定义与落地原则（不展开深度DR工具）
+<!-- 极简容灾：RPO/RTO 指标驱动，落到云盘自动快照、NAS 备份、多 AZ 拓扑与资源级备份四件云能力。跨集群/多云深度 DR 归 V2。 -->
 
 ### 生产问题
 
-某次 PV 数据损坏，团队才发现根本没有备份机制，也无法回答"最多丢多少数据、多久能恢复"。**没有容灾规范的生产，一次数据事故就是灾难**——既无备份可恢复，也无指标（RPO/RTO）评估损失，事后连改进都缺依据。
+某次云盘介质故障导致数据库 PV 损坏，团队这才发现：没有备份机制，也回答不了"最多丢多少数据、多久能恢复"。**没有容灾规范的生产，一次数据事故就是灾难——无备份可恢复、无指标评估损失，事后连改进都缺依据**。
 
 ### 传统方案失效原因
 
-- **无备份**：PV 数据无定期备份，损坏即永久丢失。
-- **无恢复演练**：即使有备份，从不演练，真要恢复时发现备份不可用/流程不通。
-- **无 RPO/RTO 定义**：没定义"可接受丢多少数据/多久恢复"，容灾没有目标。
-- **依赖单一存储**：无异地冗余，存储层故障即全丢。
+- 无备份：PV 数据无定期快照，损坏即永久丢失。
+- 有备份不演练：真恢复时才发现流程不通、权限缺失。
+- 无 RPO/RTO 定义：容灾没有目标，投入没有依据。
 
-失效根因：**把容灾当"以后再说"，没有 RPO/RTO 目标驱动的备份恢复体系**。容灾不是工具问题，是目标 + 流程 + 演练问题。
+定论，不再论证：**容灾 = 指标 + 云快照 + 演练，是目标驱动的体系，不是工具问题**。
 
 ### 架构约束与权衡
 
-容灾极简规范的约束（不展开深度 DR 工具）：
+RPO/RTO 落到具体云能力（指标定义 → 承接能力 → 典型值）：
 
-| 维度 | 规范 | 权衡 |
-|---|---|---|
-| **RPO**（恢复点目标） | 可接受丢失的最大数据量（时间度量） | RPO 越小备份越频繁，成本越高 |
-| **RTO**（恢复时间目标） | 可接受的最长恢复时间 | RTO 越短恢复能力要求越高 |
-| **备份** | 定期 PV 快照 + 异地存放 | 频率/保留期 vs 成本 |
-| **演练** | 定期恢复演练验证可用性 | 演练投入 vs 真实可用性保障 |
+| 指标 | 定义 | 落到云能力 | 典型值 |
+|---|---|---|---|
+| **RPO**（恢复点目标） | 可容忍的最大数据丢失窗口 | 云盘自动快照（最快每小时 1 次）；NAS 走云备份 | 核心库 ≤1h，一般服务 ≤24h |
+| **RTO**（恢复时间目标） | 可容忍的最长恢复时间 | 快照恢复新盘 + 重调度；多 AZ 副本接管 | 单点 <10min；AZ 级 30–60min（以演练实测为准） |
 
-权衡的核心：**容灾用成本换数据安全**。RPO/RTO 越严，备份频率/恢复能力要求越高，成本越高。按业务重要性定 RPO/RTO，不一刀切。本章只到极简规范（快照 + RPO/RTO + 演练原则），深度 DR 工具（Velero 等）归 V2。
+故障域分层一行看全：**单节点/单盘（快照恢复 + 重调度，RTO <10min）→ 可用区级（多 AZ 副本接管，RTO 30–60min）→ 地域级深度 DR（V1 不做，归 V2）**。
+
+权衡的核心：**容灾用成本换数据安全**——RPO 越小快照越频繁（存储成本上涨）、RTO 越短恢复能力要求越高。按业务重要性分级定指标；快照按增量计费，远低于再买一块盘（以官网当期价为准）。
 
 ### 最小可行方案
 
-容灾极简落地：
-
-1. **定义 RPO/RTO**：按业务重要性分级定 RPO/RTO 目标。
-2. **定期 PV 快照**：按 RPO 频率快照关键 PV，异地存放。
-3. **恢复演练**：定期演练恢复，验证备份可用 + 流程通畅。
-4. **状态外置 + 异地**：关键状态外置到对象存储（异地冗余），降低 PV 单点风险。
+1. **定指标**：按业务分级定义 RPO/RTO（核心库 1h/10min，一般服务 24h/1h 量级）。
+2. **云盘自动快照**：按 RPO 配策略（每小时 → RPO ≤1h）。
+3. **多 AZ**：节点多 AZ + 云盘同 AZ 拓扑约束（WaitForFirstConsumer，8.3）。
+4. **资源级备份 + 演练**：应用与卷一起备（ACK 备份中心/Velero），季度恢复演练。
 
 ### 生产落地实现
 
-- RPO/RTO：核心库 RPO 近零（连续备份/复制），一般服务 RPO 小时级。
-- 快照：定期 PV 快照到对象存储，保留期覆盖 RPO。
-- 演练：季度恢复演练，验证备份可用、流程可执行。
-- 异地：关键数据（备份/模型/配置）存对象存储异地冗余。
+**① 云盘自动快照策略（RPO ≤1h）**：
+
+```bash
+# 每天 24 个时间点（整点各一次）→ 最坏丢 1 小时数据；保留 7 天
+aliyun ecs CreateAutoSnapshotPolicy \
+  --Name db-rpo-1h \
+  --RepeatWeekdays "1,2,3,4,5,6,7" \
+  --TimePoints "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23" \
+  --RetentionDays 7          # 可调：合规要求更长；-1 为永久保留
+
+# 绑定目标云盘（策略 ID 取自上一步返回；数组参数传法以 aliyun CLI 帮助为准）
+aliyun ecs ApplyAutoSnapshotPolicy --AutoSnapshotPolicyId sp-xxx --DiskIds.1 d-xxx
+```
+
+对照 AWS：EBS 自动快照用 **DLM（Data Lifecycle Manager）或 AWS Backup** 配等价的每小时策略。NAS 为地域级共享存储，用**云备份服务**按计划备份（控制台配置，支持异地，以官方文档为准）；OSS 开版本控制/跨区域复制作对象层兜底。
+
+**② 多可用区：节点多 AZ + 云盘同 AZ 拓扑约束**（云盘是 AZ 级资源不能跨 AZ 挂载；8.3 的 WaitForFirstConsumer 保证"盘随 Pod 建"，多 AZ 节点池 + 以下打散 = 单 AZ 故障只影响该 AZ 副本）：
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: kafka
+  template:
+    spec:
+      topologySpreadConstraints:
+      - maxSkew: 1                         # 可调：AZ 间副本数差
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway  # 可调：DoNotSchedule 强制打散
+        labelSelector:
+          matchLabels: {app: kafka}
+```
+
+**③ 资源级备份：ACK 备份中心 / Velero 最小命令**（应用 + 卷一起备）：
+
+```bash
+# ACK 控制台一键安装"备份中心"（csdr 组件）后可托管备份计划；命令行等价走 Velero（备份存 OSS/S3 桶）
+velero backup create prod-20260814 \
+  --include-namespaces prod \
+  --snapshot-volumes=true                  # 生产禁改：必须带卷快照，否则只备 YAML 不备数据
+velero backup describe prod-20260814 --details    # 验证完成且卷快照数正确
+velero restore create --from-backup prod-20260814 --namespace-mappings prod:prod-dr   # 可跨 ns/集群
+```
+
+**④ RTO 参考区间与演练验收**：
+
+| 故障域 | 恢复动作 | RTO 参考（以演练实测为准） |
+|---|---|---|
+| 单 Pod/单盘损坏 | 快照恢复新盘 + Pod 重调度 | <10 min |
+| 单 AZ 故障 | 其余 AZ 副本接管（自动重调度 <10 min）；AZ 恢复后回迁 | 30–60 min |
+| 地域级深度 DR | 跨地域重建 | V1 不做，归 V2 |
+
+演练验收口径：从快照恢复 500 GiB 卷 + 应用接回流量全程分钟级（实测常见 <10 min）；备份有效性以"恢复出来的数据可被应用打开"为准，不是"备份任务显示成功"。升级前的资源级备份同走本节机制（4.4 已交叉引用）。
+
+云服务映射：快照/备份落在**云盘快照策略 + 云备份（NAS）+ OSS（备份存放）**，对照 **EBS snapshot/DLM + AWS Backup + S3**；备份中心功能本身无额外许可费，成本主要是快照与备份存储（以官网当期价为准）。
 
 ### 典型故障案例
 
-某 PV 损坏，无备份，数据永久丢失，业务受重创。事后定义核心库 RPO（小时级快照）+ 季度演练。下次同类故障，从快照恢复，损失控制在 RPO 内。
+数据库云盘介质故障数据不可读。因有每小时自动快照：恢复新卷（500 GiB，8 分钟）→ StatefulSet 指向恢复卷重启（4 分钟）→ 应用恢复。实际丢数 47 分钟 < RPO 1h，RTO 12 分钟——复盘后把核心库 RTO 目标从 10 min 校准为 15 min（目标必须以实测修正）；若无备份，同样的故障就是数据永久丢失。
 
-点评：**容灾不能等出事才建**。RPO/RTO + 备份 + 演练是底线，深度 DR 工具是后续。
+点评：**容灾不能等出事才建**。指标 + 快照 + 演练是底线，深度 DR 工具是后续。
 
 ### 根因定位
 
-根因不在某次损坏，而在**无 RPO/RTO 目标驱动的备份恢复体系**。没有目标、没有备份、没有演练，出事必然灾难。
+先给结论：**这不是一次"运气不好"的硬件故障，而是目标缺位**——没有 RPO/RTO 定义，就没有备份频率与恢复能力的量化要求，备份与演练永远不会被排期。
 
 ### 长效治理方案
 
-- 按业务重要性定义 RPO/RTO。
-- 关键 PV 定期快照 + 异地存放。
-- 定期恢复演练（验证可用 + 流程）。
-- 关键状态外置对象存储异地冗余。
-- 深度 DR（Velero 跨集群恢复等）归 V2，V1.0 只做极简规范。
+- 按业务分级定义 RPO/RTO，写入服务目录（与 13.2 的 SLO 同级管理）；核心云盘自动快照常开（RPO ≤1h），NAS 云备份、OSS 版本化逐项过配置。
+- 季度恢复演练：真恢复、真接流量、真计时，实测回写 RTO 目标。
+- 关键状态尽量外置 OSS（8.3③ 模式）降低 PV 单点权重；深度 DR（跨集群/多云）归 V2。
 
 ### 自动化/自治闭环
 
-容灾是机械自治的**最后防线**：**机械自治（第 5 章）处理常规自愈，但当数据层损坏、自治无法恢复时，容灾（备份/恢复）是兜底**。没有容灾，机械自治覆盖不到的数据层故障就是不可逆灾难。容灾补齐了自治的边界——自治管"可自愈的"，容灾管"必须恢复的"。
+容灾是机械自治的最后防线：L1/L2 自治处理"可自愈的"常规故障，数据层损坏超出自治边界时，快照 + 恢复流程是兜底——自治管"能自动恢复的"，容灾管"必须流程恢复的"。
 
 ### 生产检查清单
 
-- [ ] 是否按业务重要性定义了 RPO/RTO？
-- [ ] 关键 PV 是否定期快照 + 异地存放？
-- [ ] 是否定期恢复演练（验证备份可用 + 流程通畅）？
-- [ ] 关键状态是否外置对象存储异地冗余？
-- [ ] 是否明确深度 DR 工具归 V2（V1.0 只做极简规范）？
+- [ ] 按业务分级定义了 RPO/RTO 且写入服务目录？
+- [ ] 核心云盘自动快照策略生效（RPO ≤1h）并验证过可恢复？
+- [ ] 节点多 AZ + StatefulSet 拓扑打散 + WaitForFirstConsumer 三件套齐备？
+- [ ] 资源级备份（ACK 备份中心/Velero）带卷快照，存放异地 OSS/S3？
+- [ ] 季度恢复演练真恢复、真计时并回写 RTO 目标；深度 DR 明确归 V2？

@@ -1,7 +1,7 @@
 # 第6章 Containerd容器运行时生产运维
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（精简锁版） ｜ 状态：终审中 -->
 
-> 本章定位：讲清 CRI 运行时标准演进与 Containerd/runc 生产运维，聚焦容器生命周期与高频故障闭环。精简锁版，不展开深度内核隔离。
+> 本章定位：讲清 CRI 运行时标准演进与 Containerd/runc 生产运维，聚焦容器生命周期与高频故障闭环。精简锁版，不展开深度内核隔离。全书生态锁定托管 K8s：ACK/EKS 的工作节点运行时同样是 containerd——节点面是运维的责任田（4.2），本章即以「托管节点的运行时排障」视角深化。
 
 > **边界声明**：本章只讲运行时生产运维，不展开深度内核隔离与安全沙箱（gVisor/Kata 等）、不展开 AI 容器化（第 17 章）。超出部分归 V2。
 
@@ -12,7 +12,7 @@
 
 ### 生产问题
 
-老集群升 K8s 1.24+ 必须迁离 dockershim——**选型早有定论，真正的痛点是：装了 containerd 但没人"运维"它**：GC 没配、磁盘被废弃镜像层悄悄塞满；节点间版本不一、同类故障不同表现；`config.toml` 全默认、大镜像拉取慢。运行时运维缺位，是 6.4 节那些"莫名故障"的温床。
+老集群升 K8s 1.24+ 必须迁离 dockershim（v1.24 起已从 kubelet 移除）——**选型早有定论，真正的痛点是：装了 containerd 但没人"运维"它**：GC 没配、磁盘被废弃镜像层悄悄塞满；节点间版本不一、同类故障不同表现；`config.toml` 全默认、大镜像拉取慢。托管集群同样如此：ACK/EKS 的工作节点运行时就是 containerd（EKS Bottlerocket 更是内置 containerd 的不可变 OS），运行时排障就是节点面责任田（4.2）。运行时运维缺位，是 6.4 节那些"莫名故障"的温床。
 
 ### 传统方案失效原因
 
@@ -28,20 +28,32 @@
 |---|---|---|
 | 链路 | kubelet → containerd 直连（CRI 标准、可替换） | 接受抽象，换故障面小 |
 | 构建/运行 | CI 用 Docker/Buildah 构建，集群只跑 containerd | 两套工具，换职责纯净 |
-| 配置 | `config.toml` 管 GC / 快照 / 仓库 mirror / 并发下载 | 多一份配置，换磁盘与拉取性能可控 |
+| 配置 | `config.toml` 管仓库 mirror / 并发下载（镜像 GC 主旋钮在 kubelet，6.3） | 多一份配置，换磁盘与拉取性能可控 |
+| 托管节点 | ACK 节点池自动升级随 K8s 小版本滚动 containerd（4.4）；EKS 换 AMI / Bottlerocket 整机替换 | 交出逐台改的自由，换版本统一 |
 
 ### 最小可行方案
 
-1. **containerd 为准**：托管默认；自建 kubelet 配 CRI runtime。
-2. **GC 必配**：触发阈值写进 config，磁盘不靠运气。
-3. **版本全集群统一**，随 K8s 小版本协同升级（4.4 节）。
+1. **containerd 为准**：托管集群开箱即是，无需选型动作。
+2. **版本全集群统一**：随节点池升级对齐（4.4），不逐台手工升级。
+3. **GC 必配**：kubelet 镜像 GC 阈值显式化（6.3 配置段），磁盘不靠运气。
 4. **config.toml 进 Git**（第 9 章配置即代码）。
 
 ### 生产落地实现
 
-- GC：`[plugins."io.containerd.gc.v1.scheduler"]` 配触发阈值，定期清废弃镜像层。
-- 拉取加速：私有仓库 mirror + `max_concurrent_downloads`（AI 大镜像尤其，第 17 章）。
-- dockershim 迁移：先统一节点运行时 → 分批 drain 升级（4.4 滚动纪律）。
+版本统一是运行时运维的第一项摸底，一条命令扫全池：
+
+```bash
+# 控制面视角：全集群运行时名称与版本（必须全池一致）
+kubectl get nodes -o custom-columns='NODE:.metadata.name,RUNTIME:.status.nodeInfo.containerRuntimeVersion'
+# 示例输出：containerd://1.6.32 —— 出现两种版本即漂移节点，随节点池升级对齐（4.4）
+
+# 节点视角：单节点深查（ACK 用云助手下发，EKS 用 SSM Session Manager，见 6.4）
+crictl version    # Server 行 = containerd 实际版本
+```
+
+- GC：镜像清理的主旋钮是 kubelet 的 `imageGCHighTimeThreshold/LowTimeThreshold`（默认 85/80，完整配置段见 6.3）；containerd 侧废弃快照由其内部 GC 调度器回收（containerd 2.x 起可在 `config.toml` 配置触发参数，字段随版本演进，以官方文档为准）。
+- 拉取加速：私有仓库 mirror + `max_concurrent_downloads`（配置节选见 6.2 ③；AI 大镜像尤其重要，第 17 章）。
+- 云映射：ACK 节点池自动升级在维护窗口滚动节点，containerd 随节点系统升级统一版本（4.4）；EKS 对照：托管节点组滚动更换 AMI，Bottlerocket 以不可变 OS 整机替换实现升级，containerd 由发行版统一管理。
 - 运行时配置版本化，变更走 Git（第 9 章）。
 
 ### 典型故障案例
@@ -58,7 +70,7 @@
 
 - config.toml 进 Git、变更有审。
 - GC / 磁盘水位 / 拉取性能纳入观测（第 12 章）。
-- 版本随 K8s 升级协同管理（4.4 节）。
+- 版本随节点池升级协同管理（4.4 节），不逐台手工。
 
 ### 自动化/自治闭环
 
@@ -66,8 +78,8 @@ containerd 是 L1 机械自治的**执行底座**：控制循环（第 5 章）�
 
 ### 生产检查清单
 
-- [ ] GC 已配置 + 磁盘水位告警？
-- [ ] 全集群 containerd 版本统一、随 K8s 协同升级？
+- [ ] GC 已显式配置（85/80，见 6.3）+ 磁盘水位告警？
+- [ ] 全集群 containerd 版本统一、随节点池升级对齐（4.4）？
 - [ ] 构建工具不进运行镜像（构建/运行分离）？
 - [ ] config.toml 进 Git？
 - [ ] 仓库 mirror + 并发下载已配？
@@ -78,61 +90,133 @@ containerd 是 L1 机械自治的**执行底座**：控制循环（第 5 章）�
 
 ### 生产问题
 
-团队对运行时只停留在"能跑容器"，出问题不知从哪查：节点磁盘被镜像层塞满（快照未清理）、容器资源占用超标但没被限制（cgroup 未配）、镜像拉取慢（仓库/缓存配置不当）。**不理解运行时内部机制（镜像/快照/cgroup），磁盘和资源的运维就是黑盒**，等到磁盘满或资源失控才手忙脚乱。
+kubectl 只能看到 Pod 边界，节点内的容器、镜像、磁盘是"暗区"：磁盘被镜像层塞满不知从哪查（快照未清理）、容器资源超标没人发现（cgroup 视角没工具）、镜像拉取慢不知配置在哪（仓库 mirror 全默认）。**不掌握 crictl 与运行时三机制（镜像/快照/cgroup），节点面运维就是黑盒**——而节点面恰恰是托管集群下运维自己的责任田（4.2）。
 
 ### 传统方案失效原因
 
-- **镜像管理无知**：不知道运行时如何存镜像层、如何 GC，磁盘悄悄被填满。
+- **镜像管理无知**：不知道镜像层怎么存、谁来清，磁盘悄悄被填满。
 - **快照机制不清**：每容器一套 rootfs 快照，不理解快照链与清理逻辑。
 - **cgroup 未配/配错**：没设资源 limit，容器间互相挤占（noisy neighbor）。
-- **运行时配置黑盒**：`config.toml` 默认值不适配生产（GC 阈值、并发下载、镜像仓库）。
+- **工具缺位**：只会 kubectl、不会 crictl，进了节点也查不了运行时。
 
-失效根因：**只把运行时当"跑容器的黑盒"，不掌握镜像/快照/cgroup 三个核心机制**。这三个机制直接决定磁盘、资源、性能的运维效果。
+失效根因：**只把运行时当"跑容器的黑盒"**，镜像/快照/cgroup 三个机制与 crictl 一套工具都没掌握，磁盘、资源、拉取性能的运维全靠猜。
 
 ### 架构约束与权衡
 
-运行时三大核心机制：
+运行时链路（crictl 与 kubelet 走的是同一个 CRI 接口，所以它看到的就是运行时真相）：
+
+```mermaid
+flowchart LR
+    K[kubelet] -- CRI gRPC --> C[containerd] --> SH[containerd-shim-runc-v2] --> R[runc]
+    T[crictl<br/>节点面排障工具] -- 同一 CRI 接口 --> C
+    classDef kube fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef rt fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+    classDef tool fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
+    class K kube
+    class C,SH,R rt
+    class T tool
+```
+
+三大核心机制与权衡：
 
 | 机制 | 作用 | 生产权衡 |
 |---|---|---|
-| **镜像管理** | 拉取/存储/复用镜像层 | 磁盘占用、GC 策略、仓库加速 |
-| **快照（snapshotter）** | 为容器构造 rootfs（基于镜像层 + 可写层） | 快照驱动选型（overlayfs）、磁盘占用 |
-| **cgroup** | 限制/隔离容器 CPU/内存/IO | limit 配置、避免 noisy neighbor |
+| **镜像管理** | 拉取/存储/复用镜像层（content 存层，snapshotter 组装） | 磁盘占用、GC 策略、仓库加速 |
+| **快照（snapshotter）** | 为容器构造 rootfs（镜像层只读 + 可写层，默认 overlayfs） | 驱动选型、磁盘/inode 占用 |
+| **cgroup** | 限制/隔离容器 CPU/内存/IO（K8s limit 最终落到这里） | limit 配置、避免误杀（第 7 章） |
 
-权衡的核心：**镜像复用省磁盘但层依赖复杂；overlayfs 快但占 inode；cgroup 严限隔离强但可能误杀**。生产需根据负载特性调优这三者。
+权衡的核心：**镜像复用省磁盘但层依赖复杂；overlayfs 快但占 inode；cgroup 严限隔离强但可能误杀**。生产按负载特性调这三者。
 
 ### 最小可行方案
 
-运行时运维的最小实践：
-
-1. **镜像 GC**：配置运行时定期 GC 未使用镜像层，防磁盘爆满。
-2. **快照驱动**：用 overlayfs（默认，性能好），监控磁盘与 inode。
-3. **cgroup 限制**：所有容器设 CPU/memory limit + request（第 7 章），防 noisy neighbor。
-4. **仓库加速**：配置镜像仓库 + 并发下载，加速大镜像拉取（AI 大镜像尤其重要，第 17 章）。
+1. **工具面**：crictl 是节点面第一工具，先落 `/etc/crictl.yaml`（免每次敲 endpoint）。
+2. **镜像 GC**：kubelet 阈值显式化（6.3 ①），防磁盘爆满。
+3. **快照驱动**：用 overlayfs（默认，性能好），监控磁盘与 inode。
+4. **cgroup 限制**：所有容器设 CPU/memory limit + request（第 7 章），LimitRange 兜底（7.4）。
+5. **仓库加速**：mirror + 并发下载，大镜像拉取提速（AI 镜像单镜像 10GB 级，第 17 章）。
 
 ### 生产落地实现
 
-- 镜像 GC：containerd `config.toml` 设 `gc` 触发阈值，定期清理。
-- 快照：overlayfs snapshotter，监控节点磁盘使用与 inode。
-- cgroup：K8s 资源 request/limit 转为 cgroup 限制（第 7 章），配合 LimitRange 兜底。
-- 拉取加速：配置私有仓库 mirror、并发下载（`max_concurrent_downloads`）。
+**① crictl 接入配置**（不配它，每条命令都要带 `--runtime-endpoint`）：
+
+```yaml
+# /etc/crictl.yaml —— crictl 默认配置（ACK/EKS 标准节点已预置；自管节点手工放置）
+runtime-endpoint: unix:///run/containerd/containerd.sock   # 生产禁改：与 containerd 监听地址一致
+image-endpoint: unix:///run/containerd/containerd.sock     # 生产禁改：镜像操作走同一 socket
+timeout: 30s    # 可调：pull GB 级镜像等长操作调大，避免中途被掐断
+debug: false
+```
+
+**② crictl 全家桶**（节点面排障最常用七连，输出解读见表）：
+
+```bash
+sudo crictl ps          # 运行中容器：kubectl 看不到的节点内视图
+sudo crictl ps -a       # 含已退出容器 —— CrashLoop/OOMKilled 排障第一步（6.4 ①）
+sudo crictl stats       # 实时 CPU/内存占用（cgroup 口径，对照 limit 看水位）
+sudo crictl images      # 本地镜像清单与大小 —— 磁盘占用第一来源（6.4 ③）
+sudo crictl info        # 运行时全景：版本/snapshotter/sandbox 镜像/仓库配置
+sudo crictl pull registry-vpc.cn-hangzhou.aliyuncs.com/acs/pause:3.9   # 预热/验证拉取链路（地址以节点 config 为准）
+sudo crictl logs <container-id>      # 容器 stdout（kubectl logs 拿不到时的节点侧兜底）
+sudo crictl inspect <container-id>   # 退出原因/挂载/cgroup 细节（配 6.4 ① 使用）
+```
+
+| 命令 | 看什么 | 异常信号与去向 |
+|---|---|---|
+| `crictl ps` | STATE=Running、容器与 Pod 对应关系 | 本该有容器却缺席 → 查 events（6.4 ①） |
+| `crictl ps -a` | STATE=Exited + EXIT CODE | 137=被 SIGKILL（OOM/驱逐）、143=SIGTERM、1=应用错误（6.4 ①） |
+| `crictl stats` | 内存/CPU 贴不贴 limit | 内存 >90% limit → OOM 前兆（第 7 章） |
+| `crictl images` | 镜像个数与总大小 | 废弃镜像 >20 个或总占用 >30GB → 清理（6.4 ③） |
+| `crictl info` | runtimeVersion / snapshotter | 版本漂移（6.1）、snapshotter 非 overlayfs |
+| `crictl inspect` | status.reason / exitCode / mounts | reason=OOMKilled、mount 缺失（第 8 章） |
+
+> crictl 还有 `inspectp`（Pod 沙箱详情）、`inspect-rp`（运行时 Pod 信息，crictl ≥1.31 引入）等子命令，参数用法以 crictl 官方文档为准。
+
+**③ config.toml 生产只盯 3 项**（其余保持托管默认，全文结构与 2.x 版本调整以 containerd 官方文档为准）：
+
+```toml
+# /etc/containerd/config.toml（节选：生产最常调的 3 项）
+version = 2
+[plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "registry-vpc.cn-hangzhou.aliyuncs.com/acs/pause:3.9"  # sandbox(pause) 镜像：ACK 已预配内网地址，生产禁改（EKS 由 AMI 预配，以 AMI 默认值为准）
+  max_concurrent_downloads = 3   # 可调：默认 3（逐层并发下载）；AI 大镜像可调 6–10，过高打满磁盘 IO
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"   # 镜像加速入口：按仓库在此目录放 hosts.toml 配 mirror 端点（写法以官方文档为准）
+```
+
+**④ 磁盘构成：`/var/lib/containerd` 里到底是什么**：
+
+```bash
+sudo df -h /var/lib/containerd                                        # imagefs 水位（kubelet 镜像 GC 阈值作用于此，6.3）
+sudo du -sh /var/lib/containerd/* 2>/dev/null | sort -rh | head -5    # 占用构成排序
+```
+
+| 目录（/var/lib/containerd/ 下） | 内容 | 典型占比 |
+|---|---|---|
+| `io.containerd.content.v1.content/` | 镜像层原始 blob | 大头，常见 50% 以上 |
+| `io.containerd.snapshotter.v1.overlayfs/` | 镜像层组装 + 容器可写层 | 大头，常见 30% 以上 |
+| `io.containerd.metadata.v1.bolt/` | 元数据库 | MB 级，可忽略 |
+| （不在 containerd 内）`/var/log/pods/` | 容器日志，kubelet 轮转 | 磁盘满第二来源（6.4 ③） |
+
+数字参考：通用负载节点两周常堆积 20–60GB 镜像层；vLLM/CUDA 类 AI 镜像单镜像 10–20GB（第 17 章）——GPU 节点池不配 mirror + 并发下载，一次冷启动拉取就能拖垮发布窗口。
+
+云映射：ACK 节点已预配内网 pause 镜像地址，ACR 企业版实例提供 VPC 内网访问链路加速拉取（以 ACR 官方文档为准）；运行时配置变更走节点池自定义配置/自定义镜像统一下发，不逐台改文件（4.4）。EKS 对照：标准 AMI 的 containerd 可经托管节点组 launch template 的 user data 调整；Bottlerocket 为不可变 OS，不开放逐台改配置，mirror 等需求经其设置 API 统一下发（以 Bottlerocket 官方文档为准）。
 
 ### 典型故障案例
 
-某节点磁盘 100% 满，根因是运行时镜像 GC 未生效，废弃镜像层堆积。配置 GC 阈值 + 监控磁盘后，磁盘稳定在安全水位。
+某节点磁盘水位 85% 告警持续一周无人处理，最终 100% 触发成片驱逐。复盘用 `du -sh /var/lib/containerd/*` 排序：content + snapshotter 共占 72GB，`crictl images` 列出 43 个镜像、大半是历史版本。清理废弃镜像 + kubelet GC 阈值显式化（85/80，6.3）+ 磁盘告警线提前到 75% 后，水位长期稳定在 45%–60%。
 
-点评：**运行时磁盘管理是被动运维的高发区**。GC 不配，磁盘迟早爆。
+点评：**运行时磁盘管理是被动运维的高发区**。GC 不配、构成不清，磁盘迟早爆。
 
 ### 根因定位
 
-根因不在某次磁盘满，而在**运行时三大机制未运维到位**。镜像/快照/cgroup 是运行时运维的基本盘，缺一不可。
+拆到底是**运行时三大机制未运维到位**——镜像/快照/cgroup 是运行时运维的基本盘，缺一不可；再叠加节点面工具（crictl）缺位，故障只能靠猜。
 
 ### 长效治理方案
 
-- 镜像 GC 策略化 + 磁盘监控告警。
-- 快照驱动统一 overlayfs + inode 监控。
-- 所有容器强制 cgroup limit（资源 request/limit）。
-- 拉取加速配置（仓库 mirror + 并发下载）。
+- crictl.yaml 与 config.toml 变更进 Git（第 9 章），经节点池统一下发。
+- 镜像 GC 阈值显式化 + 磁盘/inode 水位告警（第 12 章）。
+- 快照驱动统一 overlayfs；所有容器强制 limit（第 7 章）+ LimitRange 兜底（7.4）。
+- mirror + 并发下载随节点池标准化配置。
 
 ### 自动化/自治闭环
 
@@ -140,11 +224,11 @@ containerd 是 L1 机械自治的**执行底座**：控制循环（第 5 章）�
 
 ### 生产检查清单
 
-- [ ] 运行时是否配置镜像 GC（防磁盘爆满）？
-- [ ] 快照驱动是否统一（overlayfs）+ 磁盘/inode 监控？
-- [ ] 所有容器是否设 cgroup 资源 limit（CPU/内存）？
-- [ ] 是否配置镜像仓库 mirror + 并发下载加速？
-- [ ] 运行时 `config.toml` 是否纳入版本管理？
+- [ ] `/etc/crictl.yaml` 已配置，crictl 在所有节点直接可用？
+- [ ] 团队掌握 crictl 七连与输出解读表？
+- [ ] `/var/lib/containerd` 占用构成摸底过（du 排序）、知道大头是 content + snapshotter？
+- [ ] mirror + `max_concurrent_downloads` 已按镜像规模配置（GPU 池重点）？
+- [ ] config.toml 进 Git、变更走节点池而非逐台改？
 
 ---
 
@@ -152,45 +236,77 @@ containerd 是 L1 机械自治的**执行底座**：控制循环（第 5 章）�
 
 ### 生产问题
 
-容器生命周期管理不规范：启动顺序乱（依赖服务没起，业务先起崩了）、优雅终止缺失（在途请求被中断）、资源隔离不彻底（容器看到不该看的资源）。**生命周期和隔离的不规范，让容器在"起、停、扩、缩"每个环节都可能出问题**，尤其对有状态和 AI 长任务负载影响最大。
+两件事同时失控：一是生命周期——启动竞态（依赖没起、业务先崩）、优雅终止缺失（在途请求被掐）；二是节点资源——驱逐参数从没人看过，某天节点突然 `HasDiskPressure`/`HasMemoryPressure`，Pod 成片 Evicted，才发现 kubelet 的保护阈值一直是"看不见的默认值"。**生命周期与隔离没规范、驱逐参数没显式化，容器在"起、停、扩、缩"每个环节都可能出问题**，AI 长任务负载受伤最重（第 17 章）。
 
 ### 传统方案失效原因
 
-- **无启动顺序管理**：不处理容器间依赖，启动竞态导致间歇性启动失败。
+- **无启动顺序管理**：不处理容器间依赖，启动竞态导致间歇性失败。
 - **无优雅终止**：SIGTERM 直接杀，在途请求/未刷盘数据丢失。
-- **隔离不彻底**：特权容器、hostPath 滥用、未隔离 namespace，安全与稳定性双失。
-- **生命周期与负载特性脱节**：对 AI 长任务用默认终止策略，进度全丢（第 17 章）。
+- **驱逐参数隐形**：evictionHard 与镜像 GC 阈值全默认，节点压力行为不可预期。
+- **隔离不彻底**：特权容器、hostPath 滥用，安全与稳定性双失（附录 A）。
 
-失效根因：**把容器生命周期当"起停"而非"有规范的过程"**。起停之间的事件处理（启动依赖、优雅终止、资源隔离）才是生产可靠性的关键。
+失效根因：**把容器生命周期当"起停"、把资源隔离当"K8s 自动管"**——起停之间的事件处理与节点压力参数才是生产可靠性的关键。
 
 ### 架构约束与权衡
 
-容器生命周期与隔离规范：
-
 | 维度 | 规范 | 权衡 |
 |---|---|---|
-| **启动** | init 容器处理依赖/前置，主容器等依赖就绪 | 启动稍慢但有序 |
-| **就绪** | readiness 探针控制流量接入时机 | 探针配置成本 |
-| **终止** | `preStop` + grace period 处理在途请求/清理 | 终止延迟换安全 |
-| **隔离** | 非特权、最小 capabilities、不用 hostPath/特权 | 调试不便但安全 |
+| **启动** | init 容器处理依赖/前置 | 启动稍慢但有序 |
+| **就绪** | readiness 探针控制流量接入时机（7.1） | 探针配置成本 |
+| **终止** | `preStop` + grace period 处理在途请求 | 终止延迟换安全 |
+| **节点压力** | evictionHard 硬阈值 + 镜像 GC 阈值显式化 | 早驱逐丢副本 vs 晚驱逐坏节点 |
+| **隔离** | 非特权、最小 capabilities、不用 hostPath | 调试不便但安全 |
 
-权衡的核心：**规范的代价是流程更严、启动/终止更慢，换来的是生产可靠性**。对短任务无状态服务可轻量，对有状态/AI 长任务必须严格。
+驱逐顺序与 QoS（BestEffort → Burstable → Guaranteed）、优先级的影响展开归第 7 章；namespace 级默认值兜底用 LimitRange（7.4）。
 
 ### 最小可行方案
 
-生命周期与隔离的最小规范：
-
 1. **启动有序**：init 容器处理依赖（如等数据库可用）。
 2. **就绪可控**：readiness 探针决定何时接流量。
-3. **优雅终止**：`preStop` 钩子处理在途请求 + 合理 grace period（AI 负载需更长）。
-4. **最小隔离**：非 root、最小 capabilities、禁用 hostPath/特权（附录 A）。
+3. **优雅终止**：`preStop` + 按负载特性的 grace period。
+4. **驱逐显式化**：evictionHard 三项 + 镜像 GC 85/80 写进 kubelet 配置基线。
+5. **最小隔离**：非 root、最小 capabilities、禁用 hostPath/特权（附录 A）。
 
 ### 生产落地实现
 
-- 启动：init 容器做依赖检查/初始化。
-- 就绪：readiness 探针（HTTP/TCP/Exec）控制 Service 流量接入。
-- 终止：`preStop` sleep/排空 + `terminationGracePeriodSeconds`（推理服务给足，第 18 章）。
-- 隔离：securityContext 非 root + drop capabilities + 禁 hostPath（附录 A）。
+**① kubelet 驱逐与镜像 GC 配置段**（KubeletConfiguration 生产基线）：
+
+```yaml
+# kubelet 配置节选（ACK 经节点池自定义 kubelet 配置/启动脚本统一下发；
+# EKS 经托管节点组 launch template 传 --kubelet-extra-args，Bottlerocket 经其设置 API 下发，均以各云官方文档为准）
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+evictionHard:                 # 硬阈值：触达即立刻驱逐（软阈值 evictionSoft 本书不展开）
+  imagefs.available: "15%"    # 可调：默认 15%——镜像盘可用 <15% 触发驱逐；GPU 大镜像池建议 20%
+  nodefs.available: "10%"     # 可调：默认 10%——节点根盘可用 <10% 触发驱逐
+  memory.available: "100Mi"   # 可调：默认 100Mi——大内存机型（≥64GiB）建议 500Mi–1Gi
+imageGCHighTimeThreshold: 85  # 可调：默认 85——镜像盘已用 >85% 开始删除未使用镜像
+imageGCLowTimeThreshold: 80   # 可调：默认 80——清理到已用 80% 停止（必须 < High）
+```
+
+三个配套事实：镜像 GC 删除的是"未被任何容器使用的镜像"（与 6.4 ③ 的手动清理同口径）；imagefs 默认与 nodefs 同盘（containerd 数据在 /var/lib/containerd，云上可挂数据盘分离）；GC 生效的前提是水位可观测——告警线建议 75%，先于 85% 的 GC 线（第 12 章）。
+
+**② 生命周期规范制品**（Pod spec 节选，最小权限模板见附录 A）：
+
+```yaml
+# Pod spec 节选：优雅终止 + 就绪控制 + 资源双限的最小组合
+spec:
+  terminationGracePeriodSeconds: 45     # 可调：Web 服务 30–60s；vLLM 推理负载建议 ≥120s（第 18 章）
+  containers:
+  - name: api
+    image: registry.cn-hangzhou.aliyuncs.com/<ns>/api:1.8.2
+    lifecycle:
+      preStop:
+        exec: {command: ["sh", "-c", "sleep 10"]}   # 等 LB 摘流（第 8 章）/注册中心下线再退出
+    readinessProbe:
+      httpGet: {path: /healthz, port: 8080}
+      initialDelaySeconds: 5   # 可调：启动慢的服务调大，防探针过早判死进 CrashLoop（7.1）
+    resources:
+      requests: {cpu: 500m, memory: 512Mi}   # 可调：requests 决定调度与驱逐顺序（第 7 章）
+      limits:   {cpu: "2",  memory: 2Gi}     # 可调：limits 落到 cgroup（6.2），防 noisy neighbor
+```
+
+云映射：ACK 节点池支持自定义 kubelet 配置，随节点池滚动升级统一下发（4.4，不逐台改）；EKS 对照：托管节点组经 launch template user data 传 `--kubelet-extra-args`，Bottlerocket 经设置 API 管理 kubelet 参数（以官方文档为准）。数字基线：驱逐三项 15%/10%/100Mi、镜像 GC 85/80、Web 服务 grace 45s、推理负载 grace ≥120s。
 
 ### 典型故障案例
 
@@ -200,13 +316,13 @@ containerd 是 L1 机械自治的**执行底座**：控制循环（第 5 章）�
 
 ### 根因定位
 
-根因不在某次更新中断，而在**生命周期与隔离规范缺失**。起停之间的事件处理不到位，每个生命周期环节都是风险点。
+问题的真正发源地不在某次更新中断，而在**生命周期与隔离规范缺失、节点压力参数隐形**——起停之间的事件处理不到位，每个生命周期环节都是风险点。
 
 ### 长效治理方案
 
-- 启动用 init 容器处理依赖。
-- 就绪用 readiness 探针控制流量。
-- 终止用 `preStop` + 合理 grace period（按负载特性调）。
+- 启动用 init 容器处理依赖；就绪用 readiness 探针控制流量。
+- 终止用 `preStop` + 按负载差异化的 grace period（AI/有状态加长）。
+- evictionHard 三项 + 镜像 GC 85/80 显式化进节点池基线（本节 ①）。
 - 隔离遵循最小权限（非 root/最小 capabilities/禁 hostPath，附录 A）。
 
 ### 自动化/自治闭环
@@ -217,9 +333,9 @@ containerd 是 L1 机械自治的**执行底座**：控制循环（第 5 章）�
 
 - [ ] 启动是否用 init 容器处理依赖？
 - [ ] 就绪是否用 readiness 探针控制流量接入？
-- [ ] 终止是否配 preStop + 合理 grace period（AI/有状态负载加长）？
+- [ ] 终止是否配 preStop + 按负载差异化的 grace period（AI/有状态加长）？
+- [ ] evictionHard 三项与镜像 GC 85/80 已显式化进 kubelet 基线（非默认隐形）？
 - [ ] 是否遵循最小权限隔离（非 root/最小 capabilities/禁 hostPath）？
-- [ ] 生命周期规范是否按负载特性差异化（短任务 vs AI 长任务）？
 
 ---
 
@@ -227,45 +343,118 @@ containerd 是 L1 机械自治的**执行底座**：控制循环（第 5 章）�
 
 ### 生产问题
 
-运行时层故障频发但排查难：Pod 一直 `ContainerCreating` 起不来、镜像拉取失败/校验失败、容器 `OOMKilled` 反复、挂载卷卡住。**这些运行时故障现象相似但根因各异，没有系统排查路径，每次都从头猜**，MTTR 居高不下。
+运行时层故障频发但排查难：Pod 一直 `ContainerCreating` 起不来、镜像拉取失败、节点磁盘打满成片驱逐、GPU 容器报 nvidia-smi 错误。**这些故障现象相似但根因各异，且大多发生在 kubectl 视线之下的节点内**——没有"控制面 → 节点 → 运行时"的分层排查路径，每次都从头猜，MTTR 居高不下。
 
 ### 传统方案失效原因
 
 - **无分类排查路径**：所有运行时故障一套乱猜，不按现象分类定位。
-- **不看事件/日志**：Pod events、容器日志、运行时日志是最直接的线索，却常被忽略。
-- **不区分故障层**：启动异常可能是镜像/网络/存储/运行时任何一层，混淆层导致误判。
-- **无闭环**：故障处理完不沉淀，同类故障反复重新排查。
+- **不进节点**：只看 Pod events（控制面线索）不看容器现场（节点线索），缺了 crictl 这一环。
+- **不区分故障层**：启动异常可能在镜像/网络/存储/运行时任何一层，混淆层导致误判。
+- **无闭环**：处理完不沉淀，同类故障反复重新排查。
 
-失效根因：**没有建立运行时故障的分类排查闭环**。运行时故障虽多但有规律，按现象分类 + 看事件日志，大部分能快速定位。
+失效根因：**没有建立"分层定位 + 命令制品化"的排查闭环**。
 
 ### 架构约束与权衡
 
-四类高频运行时故障的排查路径：
+四类高频故障的排查入口（资源卡死/挂载异常深挖分归 7/8 章，此处留路径）：
 
-| 故障类 | 典型现象 | 关键线索 | 排查方向 |
+| 故障类 | 典型现象 | 第一线索 | 制品 |
 |---|---|---|---|
-| **启动异常** | ContainerCreating/ CrashLoopBackOff | Pod events、容器日志 | 镜像/配置/依赖/探针 |
-| **镜像损坏** | 拉取失败/校验失败/层损坏 | 运行时日志、仓库状态 | 仓库/网络/digest 校验 |
-| **资源卡死** | OOMKilled/CPU throttle/D 状态 | cgroup/节点资源/监控 | limit 配置/节点压力 |
-| **挂载异常** | Mount failed/卷卡住 | kubelet/运行时日志、PV 状态 | StorageClass/PV/PVC/节点（第 8 章） |
+| **启动异常** | ContainerCreating 卡住 / CrashLoopBackOff | Pod events → 节点 crictl | ① |
+| **镜像拉取失败** | ErrImagePull / ImagePullBackOff | events 报错原文 | ② |
+| **节点磁盘满** | Evicted 成片 / HasDiskPressure | df + crictl images | ③ |
+| **GPU 运行时异常** | Pod Running 但 nvidia-smi 失败 | kubectl exec 验证链 | ④ |
+| **资源卡死** | OOMKilled / CPU throttle | crictl stats / inspect | 第 7 章 |
+| **挂载异常** | ContainerCreating 卡在 Mount | kubelet 日志 + PVC 事件 | 第 8 章 |
 
-权衡的核心：**系统排查路径用"分类 + 看线索"换快速定位**。前期建立路径投入，后期每次故障 MTTR 大幅下降。
+进节点方式（云映射）：ACK 用云助手（ECS RunCommand）下发命令，不开公网 SSH；EKS 对照 SSM Session Manager（`aws ssm start-session --target <instance-id>`，免 SSH 白名单）。
+
+权衡的核心：**制品化的排查路径用"先抄原文再分诊"换掉穷举猜测**——前期把路径写死，后期每次故障 MTTR 数量级下降。
 
 ### 最小可行方案
 
-运行时故障排查的最小闭环：
-
-1. **看 Pod events**：第一手线索（`kubectl describe pod`）。
-2. **看容器日志**：`kubectl logs` + 运行时日志（`crictl logs/inspect`）。
-3. **按现象归类**：启动/镜像/资源/挂载，对应排查方向。
-4. **沉淀闭环**：故障处理完记录根因与解法，形成排查手册。
+1. **先控制面后节点**：`kubectl describe` 抄下 events 原文，再决定要不要进节点。
+2. **节点内用 crictl**：`ps -a` → `logs` → `inspect` 三连（6.2 ② 工具箱）。
+3. **按现象归类**：四类故障对应四个制品，不跳步。
+4. **沉淀闭环**：处理完更新本节制品进值班手册（13.4）。
 
 ### 生产落地实现
 
-- 启动异常：`kubectl describe pod` 看 events（镜像拉不下？配置错？探针过早？依赖未就绪？）。
-- 镜像损坏：`crictl` 看运行时拉取日志，校验 digest/仓库可用性/网络。
-- 资源卡死：看 cgroup（`crictl inspect`）/节点资源/监控，判 OOM/throttle/节点压力（第 7 章）。
-- 挂载异常：看 PV/PVC 状态 + kubelet 日志，定位 StorageClass/卷插件/节点问题（第 8 章）。
+**① 启动异常：三段式定位链**
+
+```bash
+# 第 1 段：控制面——Pod 卡在哪一步
+kubectl -n <ns> describe pod <pod> | sed -n '/Events:/,$p'
+#   ContainerCreating 卡住 → 镜像拉取（②）或挂载（第 8 章）；CrashLoopBackOff → 进第 2 段
+
+# 第 2 段：节点——容器建出来没有、退出码是多少
+NODE=$(kubectl -n <ns> get pod <pod> -o jsonpath='{.spec.nodeName}')
+# 经云助手（ACK）/SSM（EKS）进节点后：
+sudo crictl ps -a --name <容器名关键字>     # 找 CONTAINER ID、STATE、EXIT CODE
+
+# 第 3 段：运行时——为什么退
+sudo crictl logs <cid> --tail=100                            # stdout 最后输出（应用报错第一现场）
+sudo crictl inspect <cid> | grep -E '"reason"|"exitCode"'    # reason=OOMKilled/Error 等
+```
+
+退出码速查：`137` = 128+9 被 SIGKILL（OOM 或 liveness 失败被杀，7.1）；`143` = 128+15 收到 SIGTERM（正常终止路径）；`1` = 应用自身错误（直接看 logs）；`139` = 段错误（应用缺陷）。
+
+**② 镜像拉取失败：三层分诊（DNS / 凭据 / 带宽超时）**
+
+```bash
+# 第 0 步：抄下 events 报错原文，按关键词分诊
+kubectl -n <ns> describe pod <pod> | grep -A5 'Events:'
+#   "not found" → 仓库名/标签写错；"unauthorized" → 层 2；"context deadline exceeded"/超时 → 层 3
+
+# 层 1：DNS——节点解析不了仓库域名
+nslookup registry.cn-hangzhou.aliyuncs.com    # 失败 → 查节点 VSwitch DNS（VPC DNS 配置）
+
+# 层 2：凭据——私仓认证失败
+kubectl -n <ns> get secret <pull-secret> -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d   # 确认 secret 存在且地址匹配
+#   ACK：节点池绑定 ACR 实例后由免密组件自动注入凭据（4.2 云集成摸底项）
+#   EKS 对照：同账号 ECR 由节点 IAM 角色自动获取凭据，跨账号才需要显式 secret
+
+# 层 3：带宽/超时——大镜像拉取超时（AI 镜像高发）
+sudo crictl pull <image>    # 节点直拉复现并计时：内网 mirror 生效时 GB 级镜像应在 2min 内；超时先查 mirror 配置（6.2 ③）
+```
+
+**③ 节点磁盘满：定位 + 两档清理**
+
+```bash
+# 第 1 步：水位与构成（磁盘满三来源：镜像层 / 容器日志 / emptyDir）
+df -h /var/lib/containerd /var/log/pods                        # imagefs 与日志分区各看一眼
+sudo du -sh /var/lib/containerd/* 2>/dev/null | sort -rh | head -3   # content/snapshotter 占用排序（6.2 ④）
+sudo crictl imagefsinfo                                        # imagefs 已用/可用字节数（与 kubelet GC 同口径）
+sudo crictl images | head -20                                  # 嫌疑镜像清单
+
+# 第 2 步：清理（从安全档开始）
+sudo crictl rmi <image-id>     # 安全档：定向删除指定的废弃镜像
+# 危险: crictl rmi --prune 会删除节点上所有未被容器使用的镜像——下次调度需全量重拉，
+#       GPU 大镜像池会引发拉取风暴挤占带宽；优先靠 kubelet GC（85/80，6.3 ①）自动收敛：
+# sudo crictl rmi --prune      # 生产执行前必须报备（13.4 授权白名单之外的操作）
+
+# 第 3 步：防复发——容器日志也要有上限（不设上限的日志写 nodefs 是磁盘满第二来源）
+# kubelet 基线：containerLogMaxSize: 10Mi、containerLogMaxFiles: 5（默认值即此，随 6.3 ① 配置统一下发）
+```
+
+**④ GPU 容器验证链**（驱动安装与调度深水区归第 17 章，此处是节点面验证动作）
+
+```bash
+# 验证 1：Pod 内能不能看到卡（最终判据）
+kubectl -n <ns> exec <gpu-pod> -- nvidia-smi
+#   正常：列出 GPU 型号/显存/利用率，卡数应与 requests 的 nvidia.com/gpu 一致
+#   报错特征（保守描述，深挖见第 17 章）：
+#   "couldn't communicate with the NVIDIA driver" → 设备没挂进容器或驱动不匹配
+
+# 验证 2：设备有没有挂进容器（区分"没分配"与"运行时没接手"）
+kubectl -n <ns> exec <gpu-pod> -- ls /dev/nvidia*    # 输出为空 = 设备未挂载 → 查 device plugin 分配与 nvidia 运行时注册
+
+# 验证 3：节点侧（云助手/SSM 进节点）
+sudo crictl info | grep -i runtime    # 确认 nvidia 运行时已注册（安装矩阵见第 17 章）
+nvidia-smi                            # 宿主机驱动本身是否健康
+```
+
+云映射：ACK GPU 节点池（gn7i 等）支持预装 NVIDIA 驱动与 device plugin（ACK GPU Operator，第 17 章），节点池扩容即得一致驱动；EKS 对照：EKS GPU AMI 自带驱动，Bottlerocket 提供 NVIDIA 变体镜像（不可变 OS，驱动随发行版管理）。驱动与 CUDA 兼容矩阵以 NVIDIA 及各云官方文档为准。
 
 ### 典型故障案例
 
@@ -273,23 +462,24 @@ containerd 是 L1 机械自治的**执行底座**：控制循环（第 5 章）�
 
 ### 根因定位
 
-根因不在故障本身难，而在**没有分类排查闭环 + 忽略第一手线索**。运行时故障大多 events/日志就能定位，方法论缺失才显得难。
+拆到底是**没有分类排查闭环 + 忽略第一手线索**——运行时故障大多 events/日志/crictl 三步就能定位，方法论缺失才显得难。
 
 ### 长效治理方案
 
-- 建立四类故障的分类排查路径。
-- 强制看 events + 日志作为排查第一步。
-- 故障处理完沉淀为手册，闭环复用。
-- 运行时日志/events 纳入观测（第 12 章）。
+- 四类故障 SOP（本节 ①–④ 制品）进值班手册（13.4），排查第一步永远是抄 events 原文。
+- 磁盘水位告警线 75%，先于 kubelet GC 线 85%（6.3 ①）。
+- 高频根因（探针配错、limit 不足、镜像地址漂移）反哺为准入校验与告警（第 16 章、第 12 章）。
+- 故障处理完沉淀闭环（13.4 台账），同类故障不再重复排查。
 
 ### 自动化/自治闭环
 
-故障排查闭环是机械自治的**可观测补充**：**机械自治负责自愈，但自愈失败或根因复杂时，需要人按排查闭环介入**。同时，高频故障的根因模式可反哺自治——把常见根因（如探针配错、limit 不足）做成准入校验和告警，减少故障发生。这连接了 L1（自愈）与 L2（治理）。
+故障排查闭环是机械自治的**可观测补充**：**机械自治负责自愈，但自愈失败或根因复杂时，需要人按排查闭环介入**。同时，高频故障的根因模式可反哺自治——把常见根因（探针配错、limit 不足）做成准入校验和告警，减少故障发生。这连接了 L1（自愈）与 L2（治理）。
 
 ### 生产检查清单
 
-- [ ] 是否建立了四类运行时故障的分类排查路径？
-- [ ] 排查是否强制先看 Pod events + 容器/运行时日志？
-- [ ] 是否区分了故障层（镜像/网络/存储/运行时）？
-- [ ] 故障处理是否沉淀为闭环手册？
+- [ ] 四类故障排查制品（①–④）已进值班手册、可直达？
+- [ ] 进节点通道已建（ACK 云助手 / EKS SSM），不依赖公网 SSH？
+- [ ] `crictl rmi --prune` 等危险命令在授权白名单之外（13.4）？
+- [ ] 磁盘水位告警线（75%）先于 GC 线（85%）？
+- [ ] GPU 节点池的就绪验收含验证链（exec nvidia-smi + ls /dev/nvidia*）？
 - [ ] 高频根因是否反哺为准入校验/告警？
