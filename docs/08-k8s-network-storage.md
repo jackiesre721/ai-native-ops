@@ -2,6 +2,7 @@
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（严控容灾边界） ｜ 状态：终审中 -->
 
 > 本章定位：讲清托管 K8s（阿里云 ACK 主参考、AWS EKS 对照）的网络、流量入口、存储生命周期与生产容灾极简规范——云 CNI（Terway/VPC-CNI）、SLB/NLB/ALB 流量网关、云盘/NAS/OSS 三种存储、云盘快照与 RPO/RTO 落地。容灾只到快照 + 指标 + 演练原则，深度 DR 归 V2。
+> **主线定位**：本章为网络与存储是负载运行的连接层——L1 自愈的服务面管道（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
 
 > **边界声明**：本章不讲自建 CNI（Flannel/Calico）与自建存储；不展开深度服务网格（Istio/Linkerd 全生态）、不展开深度 DR（跨集群/多云容灾）。以上统一归 V2。
 
@@ -34,6 +35,16 @@
 
 - 对照 AWS：VPC-CNI 同为 Pod 直通 VPC，Pod 密度 ≈ ENI 数 ×（单 ENI IPv4 数 − 1）+ 2（如 m5.large = 3×9+2 = 29，以实例规格文档为准）。
 - **为什么不自建 Flannel/Calico**：封包开销、节点路由与 NetworkPolicy 后端全自管，且失去 SLB 直通 Pod 等云集成——托管主栈下不采用，仅此一句（独占 ENI 模式性能最佳但密度最低，仅网络敏感场景按节点池开启）。
+
+**云 CNI 与传统 overlay 的机制对照**（帮助自建背景读者完成认知切换——本书不部署 overlay，仅对照原理）：
+
+| 维度 | 云 CNI（Terway/VPC-CNI） | 传统 overlay（Flannel VXLAN 类） |
+|---|---|---|
+| IPAM 在谁手里 | VPC/vSwitch：IP 即云资源，有配额与容量概念 | CNI 自建 IP 池：节点网段自规划自维护 |
+| Pod 转发路径 | 直通 VPC：veth/ipvlan + 节点策略路由引到 ENI，无封装 | 封装隧道：VXLAN 封包解包，跨节点走 overlay 网络 |
+| 封装开销 | 无（原生 VPC 转发，云 SLB 可直通 Pod） | 每包数十字节隧道头 + 封解包 CPU 开销 |
+| 日常运维对象 | vSwitch IP 容量、ENI/IP 配额、安全组、Terway 组件健康 | 封装协议参数、节点路由表、CNI 后端自身 |
+| 网络策略 | NetworkPolicy（需显式开启）+ 安全组双层 | NetworkPolicy（依赖 CNI 后端实现） |
 
 权衡的核心：**密度与性能二选一，多数集群选共享 ENI 多 IP；要规划的不是"CNI 品牌"，而是 vSwitch 网段容量**。
 
@@ -102,12 +113,19 @@ kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE '
 
 本节为 L1 机械自治的通信前提：第 5 章控制循环的调度与自愈都依赖 Pod 网络可达——网络层可观测，自治才不会把 Pod 调到拿不到 IP 的节点上。
 
+**补知识点：CoreDNS 与 DNS 解析放大**。K8s 给 Pod 的 `/etc/resolv.conf` 默认带 `ndots:5`——域名点数不足 5 时（多数外部域名都是），解析也先按集群内 FQDN 逐级探测多轮、兜底才走外部上游，高 QPS 服务因此把 CoreDNS 打成"延迟放大器"。
+
+- 症状：大量 2–5 秒的"随机"解析延迟，与 CoreDNS QPS 正相关，副本不足或跨节点查询时加剧。
+- 缓解：业务 Pod 用 `dnsConfig` 把 `ndots` 调小（如 2–3）或让确定的外部域直连上游；CoreDNS 副本按核数扩（cluster-proportional-autoscaler 可随集群规模自动调副本数）。
+- 标准解：**NodeLocal DNSCache** 在节点本地缓存 DNS，消除跨节点查询与 CoreDNS 单点（dnsConfig 等字段以官方文档为准）。
+
 ### 生产检查清单
 
 - [ ] 集群 CNI 为云 CNI（Terway / VPC-CNI），无自建 Flannel/Calico？
 - [ ] Terway NetworkPolicy 已开启且默认拒绝策略上线（附录 A.2）？
 - [ ] vSwitch 网段按 Pod 总量规划、剩余 <20% 有告警，分层定位命令团队会用？
 - [ ] Terway 升级有节点池级灰度预案？
+- [ ] 高 QPS 服务做过 DNS 调优（ndots 调小 / NodeLocal DNSCache）？
 
 ---
 
@@ -244,7 +262,8 @@ spec:
 
 ```bash
 kubectl -n kube-system get pods | grep -E 'ccm|alb'        # 云控制器是否健康（4.2）
-kubectl -n kube-system logs deploy/ccm --tail=50           # 失败原因（配额、权限、证书 ID 错）
+kubectl -n kube-system logs deploy/cloud-controller-manager --tail=50   # 失败原因（配额、权限、证书 ID 错）
+# 组件名以实测为准：kubectl -n kube-system get deploy | grep -i cloud-controller（版本/发行版不同名称可能不同）
 kubectl describe svc tcp-gateway                           # Events 看 CCM 回写状态
 ```
 
@@ -269,6 +288,19 @@ kubectl describe svc tcp-gateway                           # Events 看 CCM 回�
 
 本节是 L1 机械自治的对外接口层：Service/Ingress 让 Pod 的频繁起停与扩缩（第 5 章）对调用方透明——入口抽象稳定，自治动作才对用户无感。
 
+**补知识点：证书生命周期（cert-manager）**。云侧入口证书托管在 SLB/ALB（4.2 的 cert-id 注解、本节 AlbConfig 均是），但集群内部的 TLS——网关→服务的内部证书、admission webhook 证书——不能靠"人肉年度换证"：cert-manager 以 Issuer/ClusterIssuer 声明签发源（Let's Encrypt，对照阿里云数字证书托管服务与 AWS ACM），自动签发、到期前自动轮转，Ingress 注解即可接入：
+
+```yaml
+# Ingress 片段：命中 tls 段即自动申请证书写入 Secret、到期自动续（Issuer 需提前创建）
+metadata:
+  annotations:
+    cert-manager.io/issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts: [api.example.com]
+    secretName: api-tls        # 证书自动写入此 Secret，网关直接引用
+```
+
 ### 生产检查清单
 
 - [ ] 公网入口只经 ALB/NLB，且删除保护为 on？
@@ -284,6 +316,10 @@ kubectl describe svc tcp-gateway                           # Events 看 CCM 回�
 ### 生产问题
 
 发布夜 23:40，数据库滚动更新卡住：新 Pod 全部 ContainerCreating，PVC Pending 已 40 分钟——没人知道要去看 PVC 的 Events。**存储是有状态服务的命脉，而它的故障最会伪装（表现为 Pod 起不来）、排查路径最深（PVC → PV → CSI → 云盘）、出错代价最高（数据风险）**。
+
+先做一个思想实验（先自己想答案，再往下读）：云盘只能挂在与它同可用区的节点。你建了一个 3 副本服务（比如 8.4② 那只 Kafka），StorageClass 用了默认的 Immediate 绑定——PVC 建出那一刻，就随机挑了个 AZ 把盘建了。现在扩到第 3 个副本：会发生什么？
+
+认真想十秒。答案是：第 3 个副本**永远 Pending**。调度器为它选中的节点在另一个 AZ，而它的卷被钉死在第一个 AZ——卷的拓扑在 PVC 创建那一刻就拍板了，比调度的拓扑决策更早。Events 里就是那句 `volume node affinity conflict`（本节⑤判定表的第一行）。`WaitForFirstConsumer` 的解法由此而来：让卷等第一个 Pod 落位后再建——**卷的拓扑决策必须晚于调度的拓扑决策**，顺序反了就是死锁；本节末的故障案例正是它的现场版。
 
 ### 传统方案失效原因
 
@@ -303,6 +339,14 @@ kubectl describe svc tcp-gateway                           # Events 看 CCM 回�
 | **典型负载** | 数据库、消息队列 | 多 Pod 共享目录、训练 checkpoint | 模型只读分发（17.3）、备份归档 |
 | **AWS 对照** | EBS gp3 | FSx for Lustre / EFS | S3 Mountpoint |
 
+三种存储也是三份「契约」——承诺什么 / 不承诺什么（选型前先读"不承诺"列，那是踩坑高发区）：
+
+| 存储 | 承诺 | 不承诺 |
+|---|---|---|
+| **云盘（块存储）** | 块语义毫秒级低延迟；与 Pod 同 AZ 绑定——拓扑约束不是缺陷，是承诺的一部分（盘与计算同机房） | 多节点同时挂载：RWO = 单节点独占，多路挂载仅限受限场景，跨节点并发读写不在契约内 |
+| **NAS** | 多 Pod 跨节点共享读写（RWX）；地域级跨 AZ 可见 | 块存储级延迟与 IOPS——NFS 协议开销换来了共享语义 |
+| **OSS** | 海量、便宜、任意多点只读分发 | 写后立读一致（对象存储最终一致）——模型文件的只读场景刚好免疫：文件不可变，从不需要"写完马上读" |
+
 ESSD 性能级别速查（数字以官网为准）：
 
 | 性能级别 | 单盘容量区间 | 单盘最大 IOPS | 单盘最大吞吐 |
@@ -314,7 +358,17 @@ ESSD 性能级别速查（数字以官网为准）：
 
 > 对照 AWS：EBS gp3 单卷基线 3,000 IOPS / 125 MB/s，可付费配到 16,000 IOPS / 1,000 MB/s、单卷上限 16 TiB。
 
-权衡的核心：**性能、成本、数据安全的三角**——块存储高性能有拓扑约束，NAS 共享但吞吐随容量增长，OSS 最便宜但非文件语义。按负载选，不一刀切。
+数字体感：PL1 与 PL0 的 IOPS 差（5 万 vs 1 万）是数据库类负载的生死线——生产库高峰的随机读写轻松吃掉上万 IOPS，PL0 的表现是"监控全绿、就是慢"；这 4 万 IOPS 的差价，就是测试盘与生产盘的界线。
+
+权衡的核心：**性能、成本、数据安全的三角**——块存储高性能有拓扑约束，NAS 共享但吞吐随容量增长，OSS 最便宜但非文件语义。按负载选，不一刀切。「按负载选」拆开就是三个决策变量——选型不是单答案，是"它取决于"：
+
+| 决策变量 | 倾向云盘 | 倾向 NAS | 倾向 OSS |
+|---|---|---|---|
+| 时延要求 | 毫秒级随机读写（事务日志 / WAL） | 百毫秒级可容忍（文件协议开销） | 秒级可容忍（HTTP 拉取 + 本地缓存） |
+| 共享需求 | 单 Pod 独占（RWO） | 多 Pod 跨节点并发读写（RWX） | 多 Pod 只读分发（ROX） |
+| 数据形态 | 结构化热数据，要块设备语义 | 目录树、中小文件、中量并发 | 海量大文件、写一次读多次 |
+
+reco-llm 的模型文件为何落 OSS 而不是云盘（③ 的 model-weights）：16 GiB 权重写一次、之后只读分发——用不到块语义的毫秒时延，也不需要单 Pod 独占；放云盘等于为用不到的 IOPS 付费，还把"多点分发"变成"逐副本买盘复刻"。
 
 ### 最小可行方案
 
@@ -361,7 +415,9 @@ spec:
       claimName: mysql-data
 ```
 
-成本量级：500 GiB ESSD PL1 月成本约 ¥250–300（以官网当期价为准）；对照 gp3 同容量约 $40/月（以 AWS 当期价为准）。
+成本量级：500 GiB ESSD PL1 月成本约 ¥250–300（以官网当期价为准）；对照 gp3 同容量约 $40/月（以 AWS 当期价为准）——体感：日均不到 ¥10 撑住订单库的存储命脉，而丢一小时数据造成的损失远大于这块盘三年的账单。
+
+扩容语义注意：**PVC 在线扩容只能扩不能缩**——K8s 与云盘 CSI 均无安全的缩容路径，容量配错只能"快照 → 新卷 → 迁数据"重建；扩容失败会卡在 `Resizing`/`FileSystemResizePending`，排查 PV Events 与 csi-plugin 日志的 storage 层事件（常见原因：云盘配额/规格上限、CSI 组件异常）。
 
 **② NAS StorageClass + 多 Pod 共享读写**：
 
@@ -390,7 +446,7 @@ spec:
       storage: 1Ti               # 声明量用于配额规划，NAS 按实际用量计费
 ```
 
-吞吐量级（通用容量型 NAS，以官网为准）：初始 150 MB/s、容量每 +1 GiB 吞吐 +0.15 MB/s，读上限 10 GB/s、写上限 5 GB/s；**单客户端（单 Pod）读写带宽上限 500 MB/s**——高吞吐靠多 Pod 并行，不靠单挂载点。
+吞吐量级（通用容量型 NAS，以官网为准）：初始 150 MB/s、容量每 +1 GiB 吞吐 +0.15 MB/s，读上限 10 GB/s、写上限 5 GB/s；**单客户端（单 Pod）读写带宽上限 500 MB/s**——高吞吐靠多 Pod 并行，不靠单挂载点。数字体感：150 MB/s + 0.15 MB/s/GiB 意味着 1 TiB 的 NAS 才约 300 MB/s——小 NAS 冷启动慢，容量堆上去才跑得动；要喂饱 1 GB/s 的 checkpoint 写入约需 6 TiB 起步，否则只能多 Pod 并行（且单 Pod 500 MB/s 封顶）。
 
 **③ OSS StorageClass + 只读挂载模型文件**（AI 场景锚点，模型分发详见 17.3）：
 
@@ -540,6 +596,8 @@ RPO/RTO 落到具体云能力（指标定义 → 承接能力 → 典型值）�
 | **RPO**（恢复点目标） | 可容忍的最大数据丢失窗口 | 云盘自动快照（最快每小时 1 次）；NAS 走云备份 | 核心库 ≤1h，一般服务 ≤24h |
 | **RTO**（恢复时间目标） | 可容忍的最长恢复时间 | 快照恢复新盘 + 重调度；多 AZ 副本接管 | 单点 <10min；AZ 级 30–60min（以演练实测为准） |
 
+数字体感：RPO ≤1h 的另一面是"最坏丢整整一小时数据"——对订单库，就是一小时的单要人工对账；这个数够不够，不由存储团队拍板，要业务方按损失预算签字（与 13.2 的 SLO 定标同一姿势）。
+
 故障域分层一行看全：**单节点/单盘（快照恢复 + 重调度，RTO <10min）→ 可用区级（多 AZ 副本接管，RTO 30–60min）→ 地域级深度 DR（V1 不做，归 V2）**。
 
 权衡的核心：**容灾用成本换数据安全**——RPO 越小快照越频繁（存储成本上涨）、RTO 越短恢复能力要求越高。按业务重要性分级定指标；快照按增量计费，远低于再买一块盘（以官网当期价为准）。
@@ -607,7 +665,7 @@ velero restore create --from-backup prod-20260814 --namespace-mappings prod:prod
 | 单 AZ 故障 | 其余 AZ 副本接管（自动重调度 <10 min）；AZ 恢复后回迁 | 30–60 min |
 | 地域级深度 DR | 跨地域重建 | V1 不做，归 V2 |
 
-演练验收口径：从快照恢复 500 GiB 卷 + 应用接回流量全程分钟级（实测常见 <10 min）；备份有效性以"恢复出来的数据可被应用打开"为准，不是"备份任务显示成功"。升级前的资源级备份同走本节机制（4.4 已交叉引用）。
+演练验收口径：从快照恢复 500 GiB 卷 + 应用接回流量全程分钟级（实测常见 <10 min）；云盘快照是**崩溃一致**（crash-consistent）的——相当于"突然断电瞬间"的盘像，数据库类应用恢复后通常需回放 WAL/binlog 补齐事务才可用，因此验收必须恢复到"应用可读写"，而非"卷可挂载"——备份成功 ≠ 可恢复。升级前的资源级备份同走本节机制（4.4 已交叉引用）。
 
 云服务映射：快照/备份落在**云盘快照策略 + 云备份（NAS）+ OSS（备份存放）**，对照 **EBS snapshot/DLM + AWS Backup + S3**；备份中心功能本身无额外许可费，成本主要是快照与备份存储（以官网当期价为准）。
 

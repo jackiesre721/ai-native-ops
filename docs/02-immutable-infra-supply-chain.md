@@ -2,6 +2,7 @@
 <!-- 第一篇 现代运维范式 ｜ 常规章（边界纯净·无 AI 内容） ｜ 状态：终审中 -->
 
 > 本章定位：建立全书第一块地基——不可变基础设施与容器软件供应链。边界纯净，不涉及任何 AI 内容（AI 模型镜像运维由第 17 章承接）。
+> **主线定位**：本章为制品不可变是声明式期望状态可信的前提——L1 机械自治的制品地基（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
 
 > **边界声明**：本章只讲容器镜像供应链（构建→仓库→追踪→扫描→发布），不展开深度容器运行时机制（第 6 章）、不展开 AI 模型大镜像（第 17 章）。**2↔9 分工**：本章管"制品可信与不可变"（Artifact 层，拿什么东西运行）；"生产状态的声明式表达"（配置/策略/观测/交付的 Desired State）归第 9 章。超出部分归 V2。
 
@@ -107,7 +108,7 @@ crane digest acrbook-registry.cn-hangzhou.cr.aliyuncs.com/prod/demo-api:1.4.2   
 
 ---
 
-## 2.2 容器生产交付供应链极简链路：镜像构建 → 制品仓库 → 版本追踪 → 漏洞扫描 → 生产发布
+## 2.2 容器生产交付供应链极简链路：镜像构建 → 漏洞扫描 → 制品仓库 → 版本追踪 → 生产发布
 
 ### 生产问题
 
@@ -127,19 +128,19 @@ CI 直接把构建好的镜像 push 到生产仓库，跳过扫描和版本管�
 
 | 环节 | 作用 | 代价 |
 |---|---|---|
-| **镜像构建** | 可复现地产出制品 | 构建环境标准化（2.3） |
+| **镜像构建** | 可追溯地产出制品、版本可锚定 | 构建环境标准化（2.3） |
+| **漏洞扫描** | 上线前拦截已知风险（先扫后推） | 扫描耗时、误报治理 |
 | **制品仓库** | 制品的唯一可信存放地（ACR 企业版/ECR） | 存储成本（2.4 算账） |
 | **版本追踪** | tag/digest/构建来源可追溯 | 版本规范纪律 |
-| **漏洞扫描** | 上线前拦截已知风险 | 扫描耗时、误报治理 |
 | **生产发布** | 受控部署 + 审计留痕 | 发布流程成本 |
 
 ```mermaid
 flowchart LR
     G[Git 提交<br/>sha = 版本锚点] --> CI[CI 构建<br/>多阶段 + BuildKit]
     CI --> SC[漏洞扫描<br/>trivy 拦截]
-    SC --> SG[cosign 签名<br/>绑定 digest]
     SC -. 不达标即断链 .-> X[制品到此为止]
-    SG --> ACR[ACR 企业版<br/>tag 不可变]
+    SC --> ACR[ACR 企业版<br/>扫描通过才推送]
+    ACR --> SG[cosign 签名<br/>绑定 digest]
     ACR --> ARGO[ArgoCD<br/>values 引用 digest]
     ARGO --> K8S[ACK 生产集群<br/>免密拉取·4.2]
     classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
@@ -159,10 +160,10 @@ flowchart LR
 
 最小受控链路（五环节都保留，各做最轻）：
 
-1. **构建**：多阶段 Dockerfile + BuildKit 缓存，构建可复现（2.3）。
-2. **仓库**：ACR 企业版统一仓库，生产只从此拉取（免密链路见 4.2）。
-3. **版本**：tag = git commit sha，digest 锁定，禁 `latest`。
-4. **扫描**：CI 内嵌 trivy，HIGH/CRITICAL 阻断发布。
+1. **构建**：多阶段 Dockerfile + BuildKit 缓存，构建可追溯、版本可锚定（2.3）——tag=git sha 保证的是可追溯与版本锚定，不是 bit-for-bit 可复现（层时间戳/外部依赖所致，真复现需锁依赖版本 + SOURCE_DATE_EPOCH 等专门工程）。
+2. **扫描**：CI 内嵌 trivy，HIGH/CRITICAL 阻断发布——先扫后推，不达标制品不进仓库。
+3. **仓库**：ACR 企业版统一仓库，扫描通过才推送，生产只从此拉取（免密链路见 4.2）。
+4. **版本**：tag = git commit sha，digest 锁定，禁 `latest`。
 5. **发布**：ArgoCD 从 Git 同步（10 章），发布动作留痕可审计。
 
 ### 生产落地实现
@@ -172,10 +173,10 @@ flowchart LR
 | 环节 | 工具/云服务 | 产出 | 拦截点（不达标即断链） |
 |---|---|---|---|
 | 1. 提交 | Git（GitHub） | commit sha | 分支保护 + 评审 |
-| 2. CI 构建 | GitHub Actions + BuildKit | OCI 镜像（tag=sha） | 构建失败即止（2.3④） |
-| 3. 扫描 | trivy（CI 内置） | 扫描报告 | HIGH,CRITICAL 命中 → exit 1 |
-| 4. 签名 | cosign（key 模式） | 绑定 digest 的签名 | 未签名制品不进生产清单 |
-| 5. 仓库 | ACR 企业版（对照 ECR） | 制品唯一可信源 | tag 不可变 + 保留策略（2.4） |
+| 2. CI 构建 | GitHub Actions + BuildKit | OCI 镜像（tag=sha，load 到本地） | 构建失败即止（2.3④） |
+| 3. 扫描 | trivy（CI 内置，扫本地镜像） | 扫描报告 | HIGH,CRITICAL 命中 → exit 1，不推送 |
+| 4. 仓库 | ACR 企业版（对照 ECR），扫描通过才推送 | 制品唯一可信源 | tag 不可变 + 保留策略（2.4） |
+| 5. 签名 | cosign（key 模式） | 绑定 digest 的签名 | 未签名制品不进生产清单 |
 | 6. 引用 | Git values 引 digest + ArgoCD | 部署清单 | 来源/验签准入（附录 A） |
 | 7. 部署 | ACK 免密拉取（4.2） | 运行 Pod | 拉取失败即回滚（11 章） |
 
@@ -183,13 +184,14 @@ flowchart LR
 
 ```bash
 SHA=$(git rev-parse --short HEAD)
-# 闸门 1+2：可复现构建 + 入库（tag=git sha，不用 latest）
-docker buildx build --push \
+# 闸门 1+2：可追溯构建（tag=git sha，不用 latest）——load 到本地待扫，先扫后推
+docker buildx build --load \
   -t acrbook-registry.cn-hangzhou.cr.aliyuncs.com/prod/demo-api:${SHA} .
-# 闸门 3：高危 CVE 即非零退出，流水线到此为止
+# 闸门 3：扫本地镜像，高危 CVE 即非零退出——流水线到此为止，制品不推送
 trivy image --severity HIGH,CRITICAL --exit-code 1 \
   acrbook-registry.cn-hangzhou.cr.aliyuncs.com/prod/demo-api:${SHA}
-# 闸门 4：对 digest 签名（tag 可能被覆盖，digest 永不）
+# 闸门 4：扫描通过才推送，再对 digest 签名（tag 可能被覆盖，digest 永不）
+docker push acrbook-registry.cn-hangzhou.cr.aliyuncs.com/prod/demo-api:${SHA}
 cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
   acrbook-registry.cn-hangzhou.cr.aliyuncs.com/prod/demo-api@sha256:<digest>
 ```
@@ -230,7 +232,7 @@ image:
 
 ### 生产检查清单
 
-- [ ] 镜像构建可复现（同输入同输出，tag=git sha）？
+- [ ] 镜像构建可追溯、版本可锚定（tag=git sha）？
 - [ ] 统一企业仓库（ACR 企业版/ECR），生产只从此拉取？
 - [ ] 自动化漏洞扫描且 HIGH,CRITICAL 阻断发布？
 - [ ] 制品签名（cosign）+ 生产引用 digest（无 `latest`）？
@@ -260,7 +262,7 @@ image:
 | **OCI 规范** | 镜像跨仓库/运行时可移植 | 需符合规范的构建工具 |
 | **多阶段构建** | 编译产物与运行时分离 | Dockerfile 稍复杂 |
 | **精简基础镜像** | distroless/slim/alpine 砍攻击面 | 调试不便（无 shell） |
-| **构建可复现** | 同输入产同样制品 | 需锁依赖版本 |
+| **构建可追溯** | 同一 commit 的产物可锚定、可溯源 | 需锁依赖版本 |
 | **secrets 不入镜像** | 构建期注入，不 COPY 进层 | 需构建期 secret 机制 |
 
 体积账（Python 服务实例，VPC 内网拉取量级，以实测为准）：
@@ -272,13 +274,15 @@ image:
 | AI 分层（vLLM 基础层+依赖+代码，模型不进镜像） | 8–10GB | 1–3 分钟（17.3 同口径） | 数百 GB，须 ACR 企业版分发 |
 | AI 若模型入镜像 | 24–75GB | 10–35 分钟 | 禁止，完整账见 17.3 |
 
+体感换算：~180MB vs ~1.2GB = 内网拉取 3–10 秒 vs 30–90 秒（秒级 vs 分钟级）——大促紧急扩容 50 节点时，这就是"扩容速度"本身：精简镜像的新 Pod 在洪峰抵达前就已就绪，巨型镜像的节点还在等磁盘被逐层填满（分发总量 9GB vs 60GB）。
+
 权衡的核心：**镜像越精简越安全高效，但调试越不便**——生产用精简镜像，调试用临时工具镜像或 ephemeral container，职责分离。
 
 ### 最小可行方案
 
 1. **多阶段**：builder 阶段编译，runtime 只 `COPY --from=builder` 产物。
 2. **精简基础镜像选型**：优先 distroless（无 shell，攻击面最小）→ 兼容受阻退 alpine（musl 注意）→ 依赖复杂时 slim 兜底——越精简越好，但不牺牲兼容性（下例用 slim，因 venv 依赖 glibc）。
-3. **版本锁定**：基础镜像和依赖用明确版本/digest，构建可复现。
+3. **版本锁定**：基础镜像和依赖用明确版本/digest，构建可追溯、版本可锚定。
 4. **secrets 外置**：构建期由 CI secret 注入，绝不 COPY 进镜像层。
 
 ### 生产落地实现
@@ -294,7 +298,7 @@ COPY requirements.txt ./
 # BuildKit 缓存挂载：pip 缓存落缓存卷，不进镜像层（见③）
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+    && /opt/venv/bin/pip install -r requirements.txt
 
 ########## 阶段 2：runtime——只带虚拟环境 + 业务代码
 FROM python:3.12-slim-bookworm
@@ -323,7 +327,7 @@ FROM vllm/vllm-openai:v0.8.5
 WORKDIR /workspace
 COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+    pip install -r requirements.txt
 
 ########## 层 3：代码层——最常变，改代码只重建这几 MB
 COPY src/ ./src/
@@ -335,7 +339,7 @@ ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
 # 模型文件不进镜像：由部署侧 --model /mnt/model 注入（OSS 版本目录 + PVC 只读挂载，17.3 承接）
 ```
 
-模型进镜像的代价一句话：7B 权重 ≈14GB、32B ≈65GB，镜像膨胀到 24–75GB，换模型=全节点全量重拉——**模型是数据制品不是镜像层，17.3 的 OSS 方案是正解**。
+模型进镜像的代价一句话：7B 权重 ≈14GB、32B ≈65GB，镜像膨胀到 24–75GB，换模型=全节点全量重拉——**模型是数据制品不是镜像层，17.3 的 OSS 方案是正解**。体感：65GB ≈ 一款大型网游客户端的完整下载——模型进镜像等于每次发布让每个节点重下一次"整个网游"；模型外置（OSS 注入）时，换模型只重拉几 MB 的代码层。
 
 **③ BuildKit 缓存挂载**：`--mount=type=cache` 让依赖缓存落在缓存卷而非镜像层，CI 侧再加 registry 级缓存：
 
@@ -348,7 +352,7 @@ docker buildx build \
 # 效果量级：依赖安装冷构建 6–8 分钟 → 缓存命中 <1 分钟；整链路 12 分钟 → 约 3 分钟
 ```
 
-**④ CI 制品：GitHub Actions 构建→推送 ACR→扫描拦截→签名**（每步一条注释）：
+**④ CI 制品：GitHub Actions 构建→扫描拦截→推送 ACR→签名**（每步一条注释）：
 
 ```yaml
 name: build-scan-sign
@@ -375,30 +379,30 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build and push                         # ④ 多阶段构建 + 推送（tag=sha，可复现）
+      - name: Build (load)                            # ④ 多阶段构建（tag=sha，可追溯）：load 到本地待扫，不直接 push
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          load: true                                   # 生产禁改：先扫后推——扫描通过才推送（2.2 断链语义）
           tags: ${{ env.REGISTRY }}/${{ env.NS }}/demo-api:${{ github.sha }}
-          cache-from: type=gha                       # 可调：CI 缓存策略（ACR 自动构建则用其内置缓存）
+          cache-from: type=gha                         # 可调：CI 缓存策略（ACR 自动构建则用其内置缓存）
           cache-to: type=gha,mode=max
 
-      - name: Scan gate                              # ⑤ 扫描闸门：HIGH/CRITICAL 任一命中即失败
+      - name: Scan gate                                # ⑤ 扫描闸门：扫本地 daemon 内镜像，HIGH/CRITICAL 命中即失败
         uses: aquasecurity/trivy-action@0.28.0
-        env:
-          TRIVY_USERNAME: ${{ secrets.ACR_USERNAME }}
-          TRIVY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.NS }}/demo-api:${{ github.sha }}
           severity: HIGH,CRITICAL
-          exit-code: 1                               # 生产禁改：门禁语义，阻断即流水线失败
+          exit-code: 1                                 # 生产禁改：门禁语义，阻断即流水线失败、制品不推送
           format: table
 
-      - uses: sigstore/cosign-installer@v3           # ⑥ 安装 cosign
+      - name: Push                                     # ⑥ 扫描通过才推送 ACR：不达标制品到此为止，永不进生产仓库
+        run: docker push "${REGISTRY}/${NS}/demo-api:${{ github.sha }}"
 
-      - name: Sign                                   # ⑦ 对 digest 签名（key 模式；验签见 2.4）
+      - uses: sigstore/cosign-installer@v3             # ⑦ 安装 cosign
+
+      - name: Sign                                     # ⑧ 对 digest 签名（key 模式；验签见 2.4）
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
@@ -447,6 +451,14 @@ jobs:
 
 ### 生产问题
 
+先做一个思想实验（先自己想答案，再往下读）：
+
+> 周三凌晨回滚，你拉取 `demo-api:20260814-1`——与周二部署时同名、同 tag、同一仓库。先猜：此刻拿到的镜像，和周二部署进生产的是同一个吗？
+
+想十秒再往下读。答案是：**不一定，而且你无法证明**。只要仓库允许覆盖推送，这个 tag 就可能是周二之后任何人（或另一条流水线）重推的同名 tag——拉到的内容可能早已换过一轮，"回滚"因此变成一次盲抽。**tag 承诺的是"名字"，从不承诺"内容"**；能对内容作出承诺的只有 digest（sha256）：内容全局唯一、不可变，改动一个字节 digest 就换。所以"周二那个版本"的唯一可靠写法是 `demo-api@sha256:1f2e3d4f5a6b...`，tag 至多是人读的别名——这正是 10.6 Release Identity 把发布身份钉在 digest 上的原因，也是 2.1"latest 禁令"背后更一般的事实：**未开不可变保护的 tag 都是漂移入口**。
+
+——tag 之外，仓库失控还有更日常的姿势：
+
 公司用同一个镜像仓库账号给所有团队，权限是"全仓库读写"。某次实习生误删一个公共基础镜像 tag，十几个服务的 CI 集体构建失败，排查两小时；另一个团队把内部镜像 push 到公开项目，差点外泄。**仓库权限失控，等于把供应链的"唯一可信源"变成"唯一单点故障源"**——一个误操作就能瘫痪整个交付。
 
 ### 传统方案失效原因
@@ -466,6 +478,17 @@ jobs:
 | **版本不可变（tag 锁定）** | 制品发布后不可篡改 | 改制品须换 tag |
 | **拉取来源管控** | 生产只从指定仓库拉取 | 需来源准入策略 |
 | **安全拦截策略** | 不合规制品拒入库/上线 | 策略调优、误报治理 |
+
+**制品四件套的保证等级表（你到底买到了什么）**：
+
+| 能力 | 承诺 | 不承诺 |
+|---|---|---|
+| **tag** | 可读寻址——给人看的版本名 | 内容不变——未开不可变保护时可被任何人覆盖重推（上面思想实验里"背叛"的那一环） |
+| **digest** | 内容全局唯一、不可变（sha256 变即内容变） | 可读性（人记不住），也不承诺该镜像无漏洞 |
+| **扫描** | 扫描时刻的已知漏洞清单 | 零漏洞——新 CVE 随时披露，昨天全绿的镜像今天可能标红，所以扫描要周期重跑（CI 拦增量、仓库拦存量） |
+| **签名** | 签名后未被篡改（验签=完整性校验） | 内容正确——签错的代码验签照样通过，正确性归测试与评审 |
+
+一句话读法：**tag 给人读，digest 给机器锚定，扫描管"已知"，签名管"未篡改"——四者互不可替代，组合起来才是"制品可信"**。
 
 主栈选型：**ACR 企业版**（对照 ECR）。为什么不自建 Harbor，一句话：跨地域同步、漏洞扫描、多副本高可用全要自己造——这正是 ACR 企业版已经产品化的内容。权衡的核心：仓库治理增加流程摩擦，但消除"误操作瘫痪全局"的系统性风险。
 
@@ -488,7 +511,15 @@ jobs:
 | 自动构建 | 绑定代码源触发 | CodeBuild | 与 GitHub Actions 二选一（2.3④ 取舍） |
 | 安全扫描 | 内置漏洞扫描 | 基础扫描 | 与 CI trivy 互补：CI 拦增量、仓库拦存量 |
 
-保留 30 tag 的存储账：通用服务 ~180MB × 30 ≈ 5.4GB/仓库，100 个服务 ≈ 540GB；AI 镜像若 10GB × 30 tag = 300GB/仓库——又一个"模型不进镜像"的理由（17.3）。存储单价以官网当期价为准。
+保留 30 tag 的存储账：通用服务 ~180MB × 30 ≈ 5.4GB/仓库，100 个服务 ≈ 540GB；AI 镜像若 10GB × 30 tag = 300GB/仓库——又一个"模型不进镜像"的理由（17.3）。存储单价以官网当期价为准。体感：540GB 已装不下一块 512GB 的笔记本硬盘——100 个"小"服务静默吃掉一块盘。
+
+N=30 不是常数，是三个变量的函数（按仓库分级取值）：
+
+| 决策变量 | 倾向收紧 N（15–30） | 倾向放宽 N（60–120） |
+|---|---|---|
+| 发布频率 | 低频（周级发布，30 个 tag 已可回溯半年） | 高频（日多次发布，30 个 tag 只够回溯一两周） |
+| 回滚窗口需求 | 短（问题当日暴露，回滚目标 ≤5 版） | 长（合规审计/长周期缺陷需回数月前版本） |
+| 存储成本 | 敏感（AI 镜像 10GB 级，N=60 即 600GB/仓库） | 不敏感（通用服务 180MB 级，N 翻倍无感） |
 
 **② 漏洞扫描策略表**（CI 与仓库双闸门统一口径）：
 
@@ -512,6 +543,7 @@ cosign verify --key cosign.pub \
   acrbook-registry.cn-hangzhou.cr.aliyuncs.com/prod/demo-api@sha256:1f2e3d4f5a6b...
 
 # 生产进阶：验签接 K8s 准入控制器（集群内只放行已签名镜像），配置细节归附录 A，深度归 V2
+# keyless 是免密钥管理的主流路径：OIDC identity 绑定 commit（GHA 需 permissions: id-token: write）；key 模式多用于演示，深度归 V2
 ```
 
 **⑤ latest 禁令与镜像引用规范**：
@@ -554,3 +586,4 @@ cosign verify --key cosign.pub \
 - [ ] ACK 免密组件（RRSA/节点云身份）拉取，无长期 imagePullSecret？
 - [ ] cosign 签名+验签在链路中生效（准入验签指向附录 A）？
 - [ ] 生产镜像引用一律 digest 或不可变 tag（无 `latest`）？
+- [ ] 能复述保证等级表（tag 不承诺内容、扫描不承诺零漏洞、签名不承诺正确）？

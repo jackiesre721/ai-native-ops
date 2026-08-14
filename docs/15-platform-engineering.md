@@ -2,6 +2,7 @@
 <!-- 第五篇 平台工程与自治 ｜ 常规章（去产品、重思想） ｜ 状态：终审中 -->
 
 > 本章定位：第五篇开篇，去产品、重思想。平台工程的核心不是搭建运维平台，而是屏蔽基础设施复杂度、统一生产运行标准，为第 16 章自治闭环铺路。
+> **主线定位**：本章为L2 运维自治的操控面——能力封装让自治可被业务安全使用（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
 
 > **边界声明**：本章无 Backstage、无产品化搭建、无平台深度实战。专属 OnCall/FinOps/混沌平台归 V2。**15↔16 分工**：本章只讲"把能力封装成黄金路径、屏蔽复杂度"（开发者自助，Platform 思想）；"用这些能力形成 L2 自治闭环（观测→处置→校验）"归第 16 章。本章是封装，第 16 章是闭环。
 
@@ -22,7 +23,13 @@ flowchart LR
 
 ### 生产问题
 
-先算一笔账：20 个业务团队各自配部署、监控、弹性、安全，每团队按 2 人周保守估算，重复投入 ≈40 人周；一次全公司安全整改（所有服务补网络策略）要改几百处、耗时约一周（9.4 开篇的场景）。开发者困在 60+ 行 YAML 与散装监控配置里，没精力写业务。**平台工程的价值是业界定论，不再论证**；本章要解决的是落地问题：复杂度未被抽象屏蔽时，重复与不一致是必然结果。
+先做一个思想实验（先自己想答案，再往下读）：
+
+> 全公司安全审计会上，审计方只问两个问题："全公司有多少个服务配了健康探针？有多少个服务的日志格式是统一的？"先猜：平台组要多久能答上来——一小时？一天？
+
+认真想十秒。答案是：**没有黄金路径时，这两个问题永远答不准**。20 个团队就是 20 种写法，答案散在 20 个仓库里——就算逐仓普查一遍，拿到的也只是"截至昨天"的快照，今天新上的服务又不在里面。有了黄金路径，答案收敛到一个地方：查基础 chart——探针与日志默认值注入一处生效，覆写在 Git 里留痕可数（15.3），一处即全公司、永远最新。这就是平台工程的本质：**把"组织的正确"从约定变成默认值**——约定靠自觉遵守，自觉会漂移；默认值靠模板继承，继承必然生效。
+
+再算一笔数字账：20 个业务团队各自配部署、监控、弹性、安全，每团队按 2 人周保守估算，重复投入 ≈40 人周——接近一名全职工程师一整年的工时；一次全公司安全整改（所有服务补网络策略）要改几百处、耗时约一周（9.5 开篇的场景）。开发者困在 60+ 行 YAML 与散装监控配置里，没精力写业务。**平台工程的价值是业界定论，不再论证**；本章要解决的是落地问题：复杂度未被抽象屏蔽时，重复与不一致是必然结果。
 
 ### 传统方案失效原因
 
@@ -44,10 +51,10 @@ flowchart LR
 | 维度 | 自建门户/Portal（V2 不做） | 黄金路径：Git 模板 + 自助 PR（本书路线） |
 |---|---|---|
 | 载体 | IDP 产品（Backstage 等）+ 门户前端 | 基础 chart 模板 + chart-root 一个 MR |
-| 建设成本 | 选型 + 开发 + 维护，人月级起步 | 模板仓库即门户，复用 9.4 成果，2 周可用（15.4） |
+| 建设成本 | 选型 + 开发 + 维护，人月级起步 | 模板仓库即门户，复用 9.5 成果，2 周可用（15.4） |
 | 业务接入动作 | 门户注册应用、填表单、等运维排期 | 提交 8–10 字段的 values PR（15.3 ①） |
-| 治理与审批 | 门户自带权限模型，需单独建设 | CODEOWNERS + ArgoCD RBAC（10.4 ④⑤） |
-| 演进方式 | 门户版本发布 | 基础 chart 升版本 + 业务分批 MR（9.4 ③） |
+| 治理与审批 | 门户自带权限模型，需单独建设 | CODEOWNERS + ArgoCD RBAC（10.8 ④⑤） |
+| 演进方式 | 门户版本发布 | 基础 chart 升版本 + 业务分批 MR（9.5 ③） |
 
 > 右列不是低配妥协：三件云制品（Codeup/ACR/ACK）即"门户"的完整清单。V2 若做门户，也只包裹这条路径，不替代它。
 
@@ -55,7 +62,7 @@ flowchart LR
 
 ### 最小可行方案
 
-1. **抽象复杂度**：部署/观测/弹性/安全最佳实践封装进基础 chart（base-chart 仓库，9.4），业务只填业务参数。
+1. **抽象复杂度**：部署/观测/弹性/安全最佳实践封装进基础 chart（base-chart 仓库，9.5），业务只填业务参数。
 2. **统一标准**：统一可观测（12 章）、统一安全基线（附录 A）、统一交付（GitOps，10 章）。
 3. **去产品化**：chart 模板 + Git 自助 PR 即"门户"，不引入任何平台产品（Backstage 归 V2）。
 
@@ -64,16 +71,16 @@ flowchart LR
 **黄金路径健康度自检**（平台组月度跑一次，三个数字直接进治理看板）：
 
 ```bash
-# ① 自助率：近 30 天新服务是否全部走"提交目录"型接入（ApplicationSet 自动建档，10.4）
+# ① 自助率：近 30 天新服务是否全部走"提交目录"型接入（ApplicationSet 自动建档，10.8）
 git -C chart-root log --since="30 days ago" --diff-filter=A --name-only --pretty=format: -- envs/ \
   | grep -c '/values.yaml$'        # 新增黄金路径文件数 = 自助接入数（--since 可调: 统计窗口）
 # ② 抽象质量：业务必填字段数（目标 ≤10；超出 = 基础 chart 默认值在漏气）
 grep -c '业务必填' chart-root/envs/dev/demo-api/values.yaml    # 期望 ≤10
-# ③ 接入时长：新服务首笔 MR 合并到 Health=Healthy（目标 ≤10 分钟，10.4 口径）
+# ③ 接入时长：新服务首笔 MR 合并到 Health=Healthy（目标 ≤10 分钟，10.8 口径）
 argocd app get dev-demo-api | grep -E 'Sync Status|Health Status'   # Synced / Healthy
 ```
 
-- 数字：业务必填 8–10 个字段，对照"裸写清单"60+ 行；新服务接入 ≤10 分钟（10.4）；重复建设按 20 团队 × 2 人周 ≈40 人周计，封装后归零。
+- 数字（带体感）：业务必填 8–10 个字段——业务同学 5 分钟填完，一杯咖啡还没凉——对照"裸写清单"60+ 行；新服务接入 ≤10 分钟（10.8）——过去 2 天工单流程的 1/288；重复建设按 20 团队 × 2 人周 ≈40 人周计，封装后归零。
 - 云服务映射：本书路线的"门户"落在三件云制品上——私有 Git 云效 Codeup（对照 GitHub/GitLab + IAM Identity Center）承载自助 PR；ACR OCI（对照 ECR）承载 chart 与镜像分发；ACK（对照 EKS）承载运行时。
 
 ### 典型故障案例
@@ -89,7 +96,7 @@ argocd app get dev-demo-api | grep -E 'Sync Status|Health Status'   # Synced / H
 ### 长效治理方案
 
 - 平台工程聚焦"屏蔽复杂度 + 统一标准"，路线锁死黄金路径（右列对照表）。
-- 抽象唯一沉淀处 = 基础 chart（平台组独占写权限，9.4）。
+- 抽象唯一沉淀处 = 基础 chart（平台组独占写权限，9.5）。
 - 三个健康度数字（自助接入数/必填字段数/接入时长）进月度治理看板。
 - 去产品化纪律：新增任何"平台需求"先问"一个 MR 能不能解决"。
 
@@ -136,9 +143,9 @@ argocd app get dev-demo-api | grep -E 'Sync Status|Health Status'   # Synced / H
 
 | 链路环节 | 物理载体 | 落点 | 承接 |
 |---|---|---|---|
-| 标准化 Platform API | 基础 chart（base-chart 仓库）+ 薄壳模板 | 平台组维护，ACR OCI 发版 | 9.4 |
+| 标准化 Platform API | 基础 chart（base-chart 仓库）+ 薄壳模板 | 平台组维护，ACR OCI 发版 | 9.5 |
 | 业务黄金路径 | 黄金路径 values 模板（8–10 字段） | chart-root（编排仓库） | 15.3 ① |
-| 研发自助服务 | 业务 values PR → ApplicationSet 自动生成 Application | chart-root MR + ArgoCD | 10.4 ③ |
+| 研发自助服务 | 业务 values PR → ApplicationSet 自动生成 Application | chart-root MR + ArgoCD | 10.8 ③ |
 | 统一运行时规范 | 探针/资源/PDB/NetworkPolicy/ServiceMonitor/SLO 默认值 | 基础 chart 模板注入 | 13.2 / 16.2 / 附录 A |
 
 权衡的核心：**链路每前进一环，业务负担减一层、全局一致性加一层**；本书的落地形态是"chart 三仓库 + ArgoCD"这一条最短路径。
@@ -155,7 +162,7 @@ argocd app get dev-demo-api | grep -E 'Sync Status|Health Status'   # Synced / H
 **链路贯通验收**（一笔 values PR 合并后，四条命令逐环节打卡；全部通过 = 链路活着）：
 
 ```bash
-# ① 自助环节：ApplicationSet 已为新目录自动建档（生成器 YAML 见 10.4 ③，此处只验收）
+# ① 自助环节：ApplicationSet 已为新目录自动建档（生成器 YAML 见 10.8 ③，此处只验收）
 argocd app get dev-demo-api | grep -E 'Sync Status|Health Status'   # 期望 Synced / Healthy
 # ② API 环节：探针由基础 chart 注入（业务 values 里没写，照样有）
 kubectl -n dev get deploy demo-api \
@@ -170,8 +177,8 @@ argocd app diff dev-demo-api | wc -l                     # 0 = 无漂移（生�
 
 | 变更类型 | 走哪条道 | 时延（量级） |
 |---|---|---|
-| values PR（镜像/副本/域名） | 黄金路径快车道：ArgoCD 自动同步 | 发现 ≤3 分钟（默认对账周期 `timeout.reconciliation`，可调，以官方文档为准）+ 同步秒级 + Pod Ready <1 分钟（探针 initialDelaySeconds 10s，9.4 ②） |
-| 集群/节点池/VSwitch | Terraform 评审道：plan 必读 + 评审 apply（9.3 ④） | apply ≈15–25 分钟（9.2） |
+| values PR（镜像/副本/域名） | 黄金路径快车道：ArgoCD 自动同步 | 发现 ≤3 分钟（默认对账周期 `timeout.reconciliation`，可调，以官方文档为准）+ 同步秒级 + Pod Ready <1 分钟（探针 initialDelaySeconds 10s，9.5 ②） |
+| 集群/节点池/VSwitch | Terraform 评审道：plan 必读 + 评审 apply（9.4 ④） | apply ≈15–25 分钟（9.4） |
 
   **高频低危变更走链路快车道，低频高危变更走 Terraform 评审道**——链路设计的要义就在这一快一慢。
 - 云服务映射：链路运行时落 ACK（对照 EKS）；chart 与镜像经 ACR OCI 分发（对照 ECR）；自助 PR 落云效 Codeup（对照 GitHub/GitLab）。
@@ -244,7 +251,7 @@ argocd app diff dev-demo-api | wc -l                     # 0 = 无漂移（生�
 
 ```yaml
 # chart-root/envs/dev/demo-api/values.yaml —— 由 chart-root 仓 _templates/golden-path.yaml 复制而来
-# 铁律：只填「业务必填」8 个字段；没有出现的字段 = 平台默认值（基础 chart，9.4 ②）
+# 铁律：只填「业务必填」8 个字段；没有出现的字段 = 平台默认值（基础 chart，9.5 ②）
 base:
   image:
     repository: registry.cn-hangzhou.aliyuncs.com/demo/demo-api   # 业务必填①：ACR 业务镜像
@@ -263,7 +270,7 @@ base:
 # ——以下各项业务【不填】，全部平台默认值；想改 = 提基础 chart MR（平台组评审），业务 values 无权覆写——
 # probes          平台默认值：liveness /healthz + readiness /readyz + startup 探针（5/7 章）
 # pdb             平台默认值：prod 开启 minAvailable: 2（4.4 节点滚动保护）
-# hpa             平台默认值：prod 环境开启，CPU 60% 触发（副本区间见 9.4 ② 环境 overlay）
+# hpa             平台默认值：prod 环境开启，CPU 60% 触发（副本区间见 9.5 ② 环境 overlay）
 # networkPolicy   平台默认值：enabled: true，默认拒绝（附录 A.2）
 # securityContext 平台默认值：非 root + drop ALL + 只读根文件系统（见④）
 # serviceMonitor  平台默认值：enabled: true，vmagent 自动采集（12 章）
@@ -271,20 +278,20 @@ base:
 # rollout         平台默认值：金丝雀 5%→25%→50%→100%（11.2/11.5）
 ```
 
-**② ApplicationSet 自助接入**（新业务 = 一次性建薄壳 + 提交 values 目录；生成器 YAML 见 10.4 ③，不重复展开）：
+**② ApplicationSet 自助接入**（新业务 = 一次性建薄壳 + 提交 values 目录；生成器 YAML 见 10.8 ③，不重复展开）：
 
 ```text
-# 一次性动作：在业务 chart（service-chart 仓库）复制平台薄壳模板（dependencies 引基础 chart，≤5 行，9.4 ③）
+# 一次性动作：在业务 chart（service-chart 仓库）复制平台薄壳模板（dependencies 引基础 chart，≤5 行，9.5 ③）
 # 此后接入与发布，只动 chart-root（编排仓库）——全部提交内容就这么多：
 envs/dev/demo-api/
 ├── values.yaml             # ①的黄金路径模板（8 个字段）
-└── values-overrides.yaml   # 可选：仅 CI 自动改镜像 tag 用（10.4 ①）
+└── values-overrides.yaml   # 可选：仅 CI 自动改镜像 tag 用（10.8 ①）
 ```
 
 ```bash
-# MR 合并（dev 目录无 owner 自助，10.4 ④）后，ApplicationSet 自动为新目录生成 Application——平台组零介入
+# MR 合并（dev 目录无 owner 自助，10.8 ④）后，ApplicationSet 自动为新目录生成 Application——平台组零介入
 argocd app get dev-demo-api | grep -E 'Sync Status|Health Status'   # ≤3 分钟对账周期内出现
-# prod 晋升 = 目录复制 MR + CODEOWNERS 双审批（10.4）；生成器目录不含 prod——生产闸门留在 Git
+# prod 晋升 = 目录复制 MR + CODEOWNERS 双审批（10.8）；生成器目录不含 prod——生产闸门留在 Git
 ```
 
 **③ 观测自助：接入即得默认仪表盘 + 默认 SLO**（业务侧感知只有一句）：
@@ -293,10 +300,10 @@ argocd app get dev-demo-api | grep -E 'Sync Status|Health Status'   # ≤3 分�
 
 ```bash
 # ① 指标已进 VM（ServiceMonitor → vmagent 自动拉起，12 章）
-curl -s http://vmsingle-vm.observability:8428/api/v1/query --data-urlencode \
+curl -s http://vmsingle-vmstack.observability.svc:8428/api/v1/query --data-urlencode \
   'query=up{job=~".*demo-api.*"}' | jq -r '.data.result | length'        # ≥1 = 采集就位
 # ② 默认 SLO 已按 13.2 模板为本服务产出序列（有数 = burn-rate 告警已武装）
-curl -s http://vmsingle-vm.observability:8428/api/v1/query --data-urlencode \
+curl -s http://vmsingle-vmstack.observability.svc:8428/api/v1/query --data-urlencode \
   'query=job:slo_errors:ratio_rate5m' | jq -r '.data.result | length'    # ≥1 = SLO 生效
 ```
 
@@ -315,7 +322,16 @@ networkPolicy:
   enabled: true                    # 生产禁改：默认拒绝，白名单按需申请（附录 A.2）
 ```
 
-- 数字：业务必填 8 个字段，对照裸写清单 60+ 行；平台默认值覆盖 8 大项 20+ 个参数（模板尾注可查）；观测自助 ≈10 分钟生效；"忘配监控/网络策略/探针"类遗漏从偶发降为 0（16.2 口径）。
+**基础 chart 默认值保证等级表**（业务继承时到底买到了什么——与 5.3 调谐闭环保证等级表同款问法）：
+
+| 保证维度 | 承诺 | 不承诺 |
+|---|---|---|
+| **基线存在** | 探针/PDB/网络策略/非 root 的基线一定在：继承基础 chart 即生效，业务 values 无键可关（① 铁律、④ 注释） | 业务不绕过：覆写默认值必须走基础 chart MR（平台组评审），Git 之外的绕过要靠 ArgoCD 漂移检测抓出来审计 |
+| **取值水平** | 默认值面向 90% 场景调优，开箱即可用、全公司一致 | 业务最优：长尾场景（特殊探针阈值、超长优雅终止、超大资源配额）要业务覆写或提 MR——平台不替业务猜 |
+
+这张表正是 15.1 审计思想实验的契约化：第一行保证"答案永远答得准"，第二行划清"长尾自己管"。
+
+- 数字（带体感）：业务必填 8 个字段——一份"填空题"而非"论述题"，业务同学 5 分钟交卷，对照裸写清单 60+ 行；平台默认值覆盖 8 大项 20+ 个参数（模板尾注可查）；观测自助 ≈10 分钟生效——MR 合并后去接杯水，回来默认仪表盘已经在 Grafana 里等着；"忘配监控/网络策略/探针"类遗漏从偶发降为 0（16.2 口径）。
 - 云服务映射：四类封装全部跑在自建锁死栈（Helm/ArgoCD/VM/Grafana）上，底座为 ACK（对照 EKS）；chart 与镜像分发走 ACR OCI（对照 ECR）；托管可观测对照（ARMS/CloudWatch）的取舍见 12.1 决策表，本书不换栈。
 
 ### 典型故障案例
@@ -332,7 +348,7 @@ networkPolicy:
 
 - 四类能力封装清单（①–④）作为基础 chart 的验收基线，缺一类不准发版。
 - 平台默认值清单公开（模板尾注），业务"填空题"范围变更须评审。
-- 能力演进随基础 chart 升版本全局生效，业务分批升级（9.4 ③）。
+- 能力演进随基础 chart 升版本全局生效，业务分批升级（9.5 ③）。
 - 轻量封装锁死（chart/模板/Git 流程），重型平台归 V2。
 
 ### 自动化/自治闭环
@@ -342,7 +358,7 @@ networkPolicy:
 ### 生产检查清单
 
 - [ ] 业务接入只填 ≤10 个字段（黄金路径模板），其余平台默认？
-- [ ] 新业务 = 提交目录即接入（ApplicationSet，10.4 ③），平台零介入？
+- [ ] 新业务 = 提交目录即接入（ApplicationSet，10.8 ③），平台零介入？
 - [ ] 接入 ≈10 分钟即得默认仪表盘 + 默认 SLO（③ 两条命令验收通过）？
 - [ ] 安全默认（非 root/NetworkPolicy）业务不可关闭？
 - [ ] 平台默认值清单公开且变更走评审？
@@ -374,7 +390,7 @@ networkPolicy:
 
 ### 最小可行方案
 
-1. **核心抽象**：复用 9.4 三仓库 + 15.3 四类封装，不新开发任何平台组件。
+1. **核心抽象**：复用 9.5 三仓库 + 15.3 四类封装，不新开发任何平台组件。
 2. **自助门户 = 模板仓库 + 文档**：黄金路径模板 + 一页 README（下文② 命令流即文档主体）。
 3. **无 Backstage**：V1 不引入重型 IDP。
 4. **渐进**：先跑通自助，痛点数据（15.1 三数字）决定要不要 V2 门户。
@@ -385,20 +401,20 @@ networkPolicy:
 
 | 时刻 | 谁 | 做什么 | 看什么（通过判定） |
 |---|---|---|---|
-| **T+0** | 业务工程师 | 两笔自助 MR：service-chart 仓复制薄壳模板（一次性，≤5 行，9.4 ③）；chart-root 仓提交 `envs/dev/demo-api/`（黄金路径 values，15.3 ①） | MR diff：1 个新目录 + ≤30 行 |
-| **T+3min** | 无人 | ApplicationSet 自动生成 `dev-demo-api` 并同步（10.4 ③） | `argocd app get`：Synced |
+| **T+0** | 业务工程师 | 两笔自助 MR：service-chart 仓复制薄壳模板（一次性，≤5 行，9.5 ③）；chart-root 仓提交 `envs/dev/demo-api/`（黄金路径 values，15.3 ①） | MR diff：1 个新目录 + ≤30 行 |
+| **T+3min** | 无人 | ApplicationSet 自动生成 `dev-demo-api` 并同步（10.8 ③） | `argocd app get`：Synced |
 | **T+5min** | 业务工程师 | 验收部署与运行时规范（探针/资源/PDB/网络策略全为平台默认注入） | `kubectl -n dev get pods,pdb,servicemonitor -l app=demo-api`：Pod 2/2 Ready |
 | **T+10min** | 业务工程师 | 验收"接入即观测"：默认仪表盘 + 默认 SLO（15.3 ③ 两条 curl） | Grafana folder 出现；SLO 序列 ≥1 |
-| **T+30min** | 业务 + 平台（双签） | prod 晋升：目录复制 MR → CODEOWNERS 双审批（10.4 ④） | prod values 与 dev 同源、diff 可见 |
+| **T+30min** | 业务 + 平台（双签） | prod 晋升：目录复制 MR → CODEOWNERS 双审批（10.8 ④） | prod values 与 dev 同源、diff 可见 |
 | **T+2h** | 业务工程师 | 首次发布：只改 `image.tag` 提 MR → Rollout 金丝雀 5%→25%→50%→100%（时间线见 11.5 ①，全程 ≈25 分钟） | canary/stable 成功率与 p99 对比面板；异常一键 `abort` 回 stable（11.5 ②） |
 
-时间线汇总数字：**接入 ≈10 分钟、首次发布 ≈25 分钟、平台人工参与仅 1 次双签审批**。任一步失败怎么回：T+0–10min 阶段 revert 接入 MR 即回滚（服务尚未承载流量，零用户影响）；T+2h 灰度阶段 `abort`/`undo` 回 stable（11.5 ②）。
+时间线汇总数字（带体感）：**接入 ≈10 分钟、首次发布 ≈25 分钟——合计 35 分钟，不够看完一集电视剧；平台人工参与仅 1 次双签审批**。任一步失败怎么回：T+0–10min 阶段 revert 接入 MR 即回滚（服务尚未承载流量，零用户影响）；T+2h 灰度阶段 `abort`/`undo` 回 stable（11.5 ②）。
 
 **② 业务侧命令流**（制品二：跟着敲复现①，也是"门户文档"的主体）：
 
 ```bash
 # T+0 接入：薄壳（service-chart 仓库，一次性）+ 黄金路径目录（chart-root 仓库）
-cp -r service-chart/_templates/shell/ service-chart/demo-api/   # 薄壳：dependencies 引基础 chart（9.4 ③）
+cp -r service-chart/_templates/shell/ service-chart/demo-api/   # 薄壳：dependencies 引基础 chart（9.5 ③）
 cd chart-root && mkdir -p envs/dev/demo-api
 cp _templates/golden-path.yaml envs/dev/demo-api/values.yaml    # 15.3 ① 模板
 vim envs/dev/demo-api/values.yaml                               # 填 8 个业务必填字段
@@ -412,8 +428,8 @@ kubectl -n dev get pods,pdb,servicemonitor -l app=demo-api
 # T+10min 验收默认观测/SLO：两条 curl（见 15.3 ③，此处不重复）
 
 # T+2h 首次发布：只改 tag；金丝雀全过程命令流见 11.5 ②
-vim envs/prod/demo-api/values-overrides.yaml                    # image.tag: 1.8.4（10.4 ① 覆写层）
-git commit -am "release: demo-api 1.8.4" && git push            # prod 双审批（10.4 ④）
+vim envs/prod/demo-api/values-overrides.yaml                    # image.tag: 1.8.4（10.8 ① 覆写层）
+git commit -am "release: demo-api 1.8.4" && git push            # prod 双审批（10.8 ④）
 kubectl argo rollouts get rollout demo-api -n prod --watch      # 5%→25%→50%→100% 阶梯
 ```
 
@@ -425,11 +441,11 @@ kubectl argo rollouts get rollout demo-api -n prod --watch      # 5%→25%→50%
 | 基础 chart 季度大版本（新能力固化，如 SLO 模板升级） | 季度 | ≈2 人日/次（折合 <1 人日/月） |
 | ApplicationSet 生成器 / CODEOWNERS / RBAC 维护 | 月度 | ≈0.5 人日/月 |
 | 黄金路径文档与业务答疑 | 日常 | ≈1 人日/月 |
-| **合计** | — | **≈4 人日/月：平台 2 人、每人约一成工时，承载 20+ 业务团队自助交付** |
+| **合计** | — | **≈4 人日/月——折算不到半个工程师，维护着 20+ 业务团队的交付通道（平台 2 人、每人约一成工时）** |
 
-大版本升级不占平台人力：业务各自改 `dependencies.version` 提 MR、分批灰度（9.4 ③），平台只做评审。
+大版本升级不占平台人力：业务各自改 `dependencies.version` 提 MR、分批灰度（9.5 ③），平台只做评审。
 
-- 云服务映射与数字：极简平台的全部家当 = ACK Pro 控制面 ≈¥460/月（4.1）+ ECS 节点池 + ACR/云效 Codeup（对照 EKS $0.10/时 + ECR/GitHub）；人力 ≈4 人日/月。落地节奏：复用 9.4 成果后 **2 周上线**（模板 + 四类封装 + 双审批）。
+- 云服务映射与数字：极简平台的全部家当 = ACK Pro 控制面 ≈¥460/月（4.1）+ ECS 节点池 + ACR/云效 Codeup（对照 EKS $0.10/时 + ECR/GitHub）；人力 ≈4 人日/月。落地节奏：复用 9.5 成果后 **2 周上线**（模板 + 四类封装 + 双审批）。
 - 对照数字：Backstage 调研半年未落地（本节案例）vs 极简 2 周上线——差距不在能力，在顺序。
 
 ### 典型故障案例

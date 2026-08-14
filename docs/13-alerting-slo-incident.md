@@ -2,6 +2,7 @@
 <!-- 第四篇 可观测与稳定性 ｜ 常规章（合并 OnCall·轻量化混沌） ｜ 状态：终审中 -->
 
 > 本章定位：将告警标准化、SLO/错误预算、故障应急、OnCall 值班、混沌工程风险前置合并为一套稳定性应急体系。OnCall 完全并入应急体系（无独立扩容），混沌仅极简注入 + SLO 校验（不做平台化展开）。
+> **主线定位**：本章为L2 运维自治的人工侧——SLO/应急/复盘是自治的人工兜底与反哺源（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
 
 > **边界声明**：本章不展开专属 OnCall 平台、不展开混沌工程平台、不展开 CIS 详细加固。以上归 V2。**SLO 职责锁**：本章是 SLO 的"人工应急"视角（SLO/错误预算/告警/故障/OnCall）；SLO 驱动的自动化处置归第 16 章，AI 负载专属 SLO 归第 18.6 节。告警栈跑在锁死栈上（vmalert + Alertmanager，第 12 章），告警通道接云与 IM（电话/钉钉/飞书）。
 
@@ -22,7 +23,7 @@ flowchart LR
 
 ### 生产问题
 
-凌晨 3 点，第 47 条告警亮起，值班扫了眼标题——"又是那个已知抖动"——划掉了。第 48 条是真实故障，也被一起划掉，直到用户投诉才暴露，延误 40 分钟。**告警越多、有效信号越少——"看见"退化成"看不见"**。
+凌晨 3 点，第 47 条告警亮起，值班扫了眼标题——"又是那个已知抖动"——划掉了。第 48 条是真实故障，也被一起划掉，直到用户投诉才暴露，延误 40 分钟。**告警越多、有效信号越少——"看见"退化成"看不见"**。给这 40 分钟一个体感：在墨丘里商城的支付链路上，一次 P0 全站故障烧光整月错误预算只要 43 分钟（13.2）——延误的这 40 分钟里，近一个月的预算已经烧完、投诉已经打进客服，而值班收到的第一个信号仍然是用户，不是告警。
 
 ### 传统方案失效原因
 
@@ -72,8 +73,9 @@ route:
     group_wait: 0s                        # 生产禁改：P0 零等待
     repeat_interval: 30m                  # P0 未恢复每 30min 再打
     continue: false
-  - receiver: im-core                     # P1：核心值班群
+  - receiver: phone-core                 # P1：page 级（电话+核心群）——burn-rate 快烧落此档（13.2）
     matchers: ['severity="P1"']
+    group_wait: 0s                        # P1 同样零等待：page 语义就是叫醒值班
     repeat_interval: 1h
   - receiver: im-default                  # P2/P3：普通群
     matchers: ['severity=~"P2|P3"']
@@ -84,11 +86,14 @@ inhibit_rules:                            # 抑制：高等级触发时压制同
   equal: ['cluster', 'namespace']
 receivers:
 - name: phone-and-im
-  webhook_configs:                        # 电话：云厂商语音服务/钉钉电话机器人；IM：钉钉/飞书群机器人 webhook
-  - url: https://oapi.dingtalk.com/robot/send?access_token=<token>
-- name: im-core
+  webhook_configs:                        # 生产禁改: 必须经适配器转发，勿直连 IM 机器人——Alertmanager 发
+  - url: http://alert-webhook-adapter.observability.svc/dingtalk   # {"alerts":[...]}，钉钉/飞书机器人只收
+                                          # {"msgtype":...}，直连推送全部失败且不易察觉。适配器用
+                                          # prometheus-webhook-dingtalk 或自建转发；电话铃流由适配器回调
+                                          # 云语音服务（阿里云语音服务/对照 AWS SNS→语音）触发
+- name: phone-core
   webhook_configs:
-  - url: https://oapi.dingtalk.com/robot/send?access_token=<token>
+  - url: http://alert-webhook-adapter.observability.svc/dingtalk?level=page   # 适配器判定电话+群（注见上）
 - name: im-default
   webhook_configs:
   - url: https://oapi.dingtalk.com/robot/send?access_token=<token>
@@ -118,7 +123,7 @@ groups:
 
 **③ 静默与闭环**：
 
-- 维护窗口静默：`amtool silence add cluster=demo namespace=default duration=2h comment="升级窗口 4.4"`——静默必须带原因与时长，永不超过 24h。
+- 维护窗口静默：`amtool silence add --duration=2h --comment="升级窗口 4.4" cluster=demo namespace=default`——duration/comment 是命令行 flag，写成 `key=value` 会被解析成两个额外 matcher，静默永不匹配（静默必须带原因与时长，永不超过 24h）。
 - 闭环：告警 webhook 同步开工单（钉钉群接机器人或工单系统 API），未认领 5 分钟自动电话升级（P0/P1）。
 
 云服务映射：电话通道用云语音（阿里云语音服务/钉钉电话；对照 AWS SNS→语音），告警系统本身用自建锁死栈（vmalert+Alertmanager，12 章）——规模 <50 节点时托管监控（ARMS/CloudWatch）也可承接，但为保持全书栈一致与成本可控，生产走自建。
@@ -172,7 +177,7 @@ groups:
 | **SLO** | SLI 的目标值（如成功率 ≥99.9%） | 用户期望 + 历史数据（近 90 天 p50 水位上调） |
 | **错误预算** | 允许的不可用量（1−SLO） | 发布冻结/优先级的决策货币 |
 
-关键数字：**SLO 99.9%（30 天窗口）= 错误预算 43.2 分钟**；99.95% = 21.6 分钟；99.99% = 4.3 分钟。预算数字必须先算出来再定目标——99.99% 意味着一个月只允许 4 分钟不可用，多数内部系统撑不起这个发布纪律。
+关键数字：**SLO 99.9%（30 天窗口）= 错误预算 43.2 分钟**；99.95% = 21.6 分钟；99.99% = 4.3 分钟。工程体感：43.2 分钟/月 ≈ 每月允许一次电梯停电的时长；4.3 分钟 ≈ 烧一壶开水的工夫——99.99% 的世界里，壶还没烧开，月预算已经烧完。预算数字必须先算出来再定目标——99.99% 意味着一个月只允许 4 分钟不可用，多数内部系统撑不起这个发布纪律。
 
 权衡的核心：**SLO 越严预算越少、开发越受限；越松体验越差**。基准：面向用户的核心链路 99.9%~99.95%，内部服务 99.5%。
 
@@ -191,14 +196,22 @@ groups:
 groups:
 - name: slo-recording
   rules:
-  - record: job:slo_errors:ratio_rate5m        # 5m 窗口错误率
+  - record: job:slo_errors:ratio_rate5m        # 5m 窗口错误率（by (job) 保住标签——丢了它下游按 job 过滤恒为空）
     expr: |
-      sum(rate(http_requests_total{job="api",code=~"5.."}[5m]))
-      / sum(rate(http_requests_total{job="api"}[5m]))
-  - record: job:slo_errors:ratio_rate1h        # 1h 窗口（burn-rate 用）
+      sum by (job) (rate(http_requests_total{code=~"5.."}[5m]))
+      / sum by (job) (rate(http_requests_total[5m]))
+  - record: job:slo_errors:ratio_rate1h        # 1h 窗口（快烧用）
     expr: |
-      sum(rate(http_requests_total{job="api",code=~"5.."}[1h]))
-      / sum(rate(http_requests_total{job="api"}[1h]))
+      sum by (job) (rate(http_requests_total{code=~"5.."}[1h]))
+      / sum by (job) (rate(http_requests_total[1h]))
+  - record: job:slo_errors:ratio_rate30m       # 30m 窗口（慢烧短腿）
+    expr: |
+      sum by (job) (rate(http_requests_total{code=~"5.."}[30m]))
+      / sum by (job) (rate(http_requests_total[30m]))
+  - record: job:slo_errors:ratio_rate6h        # 6h 窗口（慢烧长腿）
+    expr: |
+      sum by (job) (rate(http_requests_total{code=~"5.."}[6h]))
+      / sum by (job) (rate(http_requests_total[6h]))
 ```
 
 **② burn-rate 多窗口告警**（Google SRE 经典双窗口，治"慢烧不动声色"）：
@@ -208,26 +221,41 @@ groups:
 ```yaml
 - name: slo-burnrate
   rules:
-  - alert: ErrorBudgetBurnFast                # 快烧：14.4× —— 1h 烧掉 2% 月预算 → 打电话
+  - alert: ErrorBudgetBurnFast                # 快烧：14.4× —— 1h 烧掉 2% 月预算 → page 值班
     expr: |
       job:slo_errors:ratio_rate1h > (14.4 * 0.001)
-      and on() job:slo_errors:ratio_rate5m > (14.4 * 0.001)
+      and on(job) job:slo_errors:ratio_rate5m > (14.4 * 0.001)
     for: 2m
-    labels: {severity: P0}
+    labels: {severity: P1}      # 页级（page 单人电话）；组织级 P0 战争室留给 13.3 矩阵判定（全站不可用等）
     annotations:
-      summary: "api 错误预算快烧（1h/5m 双窗口 14.4×）"
+      summary: "{{ $labels.job }} 错误预算快烧（1h/5m 双窗口 14.4×）"
       action: "按 13.3 应急 SOP 止损；查最近变更"
   - alert: ErrorBudgetBurnSlow                # 慢烧：6× —— 6h 烧掉 5% 月预算 → 工单
-    expr: |
-      job:slo_errors:ratio_rate1h > (6 * 0.001)
-      and on() job:slo_errors:ratio_rate5m > (6 * 0.001)
+    expr: |                     # 慢烧两腿必须是 6h/30m（Google 配方）：6× 在 6h 窗才等于 5% 月预算
+      job:slo_errors:ratio_rate6h > (6 * 0.001)
+      and on(job) job:slo_errors:ratio_rate30m > (6 * 0.001)
     for: 15m
     labels: {severity: P2}
     annotations:
       action: "排查慢性劣化（容量/依赖）；不必止损但必须开工单"
 ```
 
-双窗口的意义：只看 1h 会被瞬时抖动误触发，只看 5m 抓不住慢性消耗；两个同时超阈才告警，误报率数量级下降。
+**双窗口的意义——升格为一个思想实验（先猜后揭晓）**：给墨丘里商城的支付服务 payment-api 构造一条错误率曲线——周一 10:00–10:05，错误率冲到 3%（持续 4 分钟）后回落；周二 11:00 起，错误率爬到 0.35%，稳稳挂了 6 小时。先猜（认真想十秒再往下读）：如果告警只配单窗口 1h，这两天各会怎么反应？
+
+揭晓：周一的 4 分钟尖峰，3% 落进 60 分钟的 1h 窗口被稀释成 3% × 4/60 ≈ 0.2%，够不着 14.4× 的门槛（1.44%）——**单看 1h，漏报**：短促剧烈的故障形态在长窗里永远隐身。（较真一下：这 4 分钟只烧掉约 0.3% 月预算，不打电话本是对的；但若 3% 不回落、烧满近半小时，1h 腿撞上 1.44% 线、5m 腿全程摆红，两只眼合握电话才响——恰好落在"1h 烧掉 2% 月预算才打电话"的设计线上。）
+
+周二的慢性烧，单看 5m 也漏——0.35% 在 5m 窗口里还是 0.35%，低于快烧阈值，短窗里它与背景抖动无异；可它以 3.5 倍允许错误率的转速烧了 6 小时，无声吃掉近 3% 的月预算——慢性消耗的证据，只有长窗攒得出来。只有双窗口把两只手都张开——**长窗抓慢性（慢烧档 6h 攒证据）、短窗确认真实（30m 看此刻还在不在烧）**——剧烈尖峰与慢性消耗这两类故障形态才各有眼睛。这正是双窗口的本质：**不是降噪技巧，是两类故障形态各配一只眼睛**；AND 把两只眼合握：长窗证明"烧得够痛"，短窗证明"现在还在烧"。（再较真一句：0.35% 连慢烧档 6× 的线也没过，这次谁管它？单次 3% 不疼，但月内反复发生，③ 的剩余预算曲线就会跌破 50%/25% 档位——burn-rate 管"超速"，预算档位管"累计"，长窗短窗之外还有第三道网。）
+
+生产经验值：**双窗口组合误报率可压到 5% 以内，单窗口通常在 15%–20% 量级**（因指标特征而异，以本单位实测校准）。
+
+**SLO 与 burn-rate 的保证等级表**（承诺什么 / 不承诺什么——你买到的确切契约）：
+
+| 机制 | 承诺 | 不承诺 |
+|---|---|---|
+| **SLO/错误预算** | 长窗口上的统计度量：30 天窗口 99.9% = 43.2 分钟错误预算，消耗可计算、可作发布决策的货币 | 小流量下的置信度：月请求 1 万次的服务，预算额度只够 10 个错误请求，99.9% 的"达标"可能只是运气——样本不足时预算消耗数字噪声很大；低流量服务应改用更长窗口或聚合多服务 SLO |
+| **burn-rate 告警** | 检出时延有上限：约 = 窗口长度 ÷ 超阈倍数（错误率超阈 10 倍时，1h 档约 6 分钟撞线，另加 `for` 时长） | 定位根因：只度量"烧多快"，不回答"为什么烧"——根因定位走三支柱协同（12 章） |
+
+置信度对照（墨丘里商城）：payment-api 日请求百万级、30 天样本数千万，43 分钟预算的消耗曲线平滑可信；同商城的内部对账 API 月请求仅万级，直接套 99.9% 等于在读噪声——要么把窗口拉长到 90 天，要么并入支付域聚合 SLO。
 
 **③ 错误预算四档管控策略**（发布系统的硬规则，接第 11 章变更流程）：
 
@@ -268,6 +296,7 @@ SLO 是 L2 运维自治（16 章）的决策标尺：自治处置（扩缩/限�
 - [ ] burn-rate 双窗口告警（14.4× P0 / 6× P2）已上线？
 - [ ] 预算四档策略接入发布流程（耗尽自动冻结 + 双签解冻）？
 - [ ] 预算剩余看板可用且 <25% 变红？
+- [ ] 低流量服务做过 SLO 置信度评估（更长窗口或聚合多服务 SLO）？
 
 ---
 
@@ -296,6 +325,8 @@ P0–P3 分级矩阵（与 13.1 告警 severity 同一张表，全公司唯一�
 | **P1** | 核心功能部分受损 / 成功率 90–97% / p99 超 SLO 3 倍 | 10 min 内认领 | 2h 内止损 | 值班 + 模块 owner |
 | **P2** | 次要功能受损，有绕行方案 | 30 min 内认领 | 当天 | 值班 |
 | **P3** | 无用户影响的潜在风险 | 工单响应 | 排期 | 白班 |
+
+响应时限的体感校准：P0 认领 5 分钟 = 泡一杯茶的时间；止损 30 分钟 = 一份外卖的配送时长——下面的升级链路就是给这两个数字装的闹钟。
 
 升级链路（超时自动升级，不靠人判断）：**认领超时 → 升 TL；止损超时 → 升技术负责人；P0 30 min 未止损 → 升 CTO + 云厂商大客户通道**（ACK/EKS 严重故障走企业支持群，平时就应建好通道）。
 

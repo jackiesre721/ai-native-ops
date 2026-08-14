@@ -126,7 +126,7 @@ spec:
 
 ## A.3 Pod安全、Secret治理与云身份凭据
 
-> **风险**：特权容器/hostPath/root 运行是容器逃逸三件套；Secret 明文进 Git；AK/SK 长期凭据塞进集群——泄露面从"一个应用"扩大到"整个云账号"（见 4.2 的 17 分钟清桶案例）。
+> **风险**：特权容器/hostPath/root 运行是容器逃逸三件套；Secret 明文进 Git；AK/SK 长期凭据塞进集群——泄露面从"一个应用"扩大到"整个云账号"（见 4.2 的 17 分钟清桶案例：17 分钟=一把 AK 从泄露到整桶数据被脚本清空，比一次站会还短，人工反应必然迟到）。
 > **AK/SK 零容忍（一行）**：所有 Pod 云身份必须走 RRSA/IRSA 临时凭据（见 4.2），本节对其做"全走检查"。
 
 | 维度 | 基线要求 | 落地方式 | 检查方法 |
@@ -232,7 +232,7 @@ trivy image --severity HIGH,CRITICAL --exit-code 1 \
 
 | 维度 | 基线要求 | 落地方式 | 检查方法 |
 |---|---|---|---|
-| 云操作审计 | ActionTrail/CloudTrail 开启，管理写操作全留痕，留存 ≥180 天 | 单账号追踪投递 OSS/SLS（下方命令）+生命周期规则 180 天以上（云端默认可查询窗口约 90 天，以官方文档为准） | 抽查任一敏感操作可查到操作者与时间；生命周期规则核对 |
+| 云操作审计 | ActionTrail/CloudTrail 开启，管理写操作全留痕，留存 ≥180 天（=半年内任何一次可疑操作都可回查——只靠云端默认 90 天窗口，上个季度以前就查不动了） | 单账号追踪投递 OSS/SLS（下方命令）+生命周期规则 180 天以上（云端默认可查询窗口约 90 天，以官方文档为准） | 抽查任一敏感操作可查到操作者与时间；生命周期规则核对 |
 | K8s 审计 | API 审计日志开启 | ACK 控制台开启审计日志投递 SLS；EKS 开启 control plane logging（下方命令） | 审计日志库有近期 apiserver 事件 |
 | 敏感操作告警 | RAM 策略变更/安全组变更/角色提权即告警 | ActionTrail→SLS 告警规则（事件名如 CreatePolicy、AuthorizeSecurityGroup），通道接 13.1 分级路由（P1 起步） | 演练一次变更，告警 5 分钟内触达值班 |
 | 推理调用审计 | 谁/何时/调用什么模型/资源消耗，日志集中且不可篡改 | 推理网关访问日志集中 Loki（见 12.4），带模型版本与租户标签；云侧审计桶开版本控制防误删 | 异常调用可定位到主体；定期出审计报告并评审 |
@@ -295,3 +295,65 @@ aws eks update-cluster-config --name <cluster> --region <region> \
 - [ ] ActionTrail/CloudTrail 开启且留存 ≥180 天（OSS/S3 生命周期兜底）？
 - [ ] RAM 策略/安全组变更告警已接 13.1 分级通道？
 - [ ] GPU 配额隔离（见 17.2）与推理调用审计可追溯到团队/主体？
+
+---
+
+## 附：安全基线一键检测脚本（示例）
+
+> 复用 A.1–A.6 的检查命令串联成只读巡检脚本（示例基线）：输出 PASS/FAIL 与汇总计数，FAIL>0 按附录 A 分级处置。参数按环境调整后接入 CI 或周巡检（14.4）。
+
+```bash
+#!/usr/bin/env bash
+# security-baseline-check.sh —— 附录 A 基线巡检（只读，不做任何变更）
+PASS=0; FAIL=0
+check() {  # check "描述" 命令 —— 退出码 0 = PASS
+  local desc="$1"; shift
+  if "$@" >/dev/null 2>&1; then PASS=$((PASS+1)); echo "PASS  $desc"
+  else FAIL=$((FAIL+1)); echo "FAIL  $desc"; fi
+}
+count_fail() {  # 计数型：值应为 0
+  local desc="$1" val="$2"
+  if [ "$val" = "0" ]; then PASS=$((PASS+1)); echo "PASS  $desc"
+  else FAIL=$((FAIL+1)); echo "FAIL  $desc（检测到 $val 处）"; fi
+}
+
+# A.3 云身份：集群内 AK/SK 明文反扫（应=0；覆盖阿里云 LTAI/AWS AKIA·ASIA 前缀）
+LEAKED=$(kubectl get secret -A -o json | jq -r '.items[].data | to_entries[]?.value' 2>/dev/null \
+  | while read -r v; do echo "$v" | base64 -d 2>/dev/null; done \
+  | grep -cE '(LTAI[A-Za-z0-9]{12,24}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16})')
+count_fail "A.3 集群内无 AK/SK 明文" "$LEAKED"
+
+# A.3 RRSA：核心业务命名空间 SA 至少存在云身份绑定（示例查 default，按需扩列表）
+BOUND=$(kubectl get sa -n default -o json \
+  | jq '[.items[] | select(.metadata.annotations["alibabacloud.com/role-arn"] != null)] | length')
+if [ "${BOUND:-0}" -ge 1 ]; then PASS=$((PASS+1)); echo "PASS  A.3 default 命名空间存在 RRSA 绑定（$BOUND 个）"
+else FAIL=$((FAIL+1)); echo "FAIL  A.3 default 命名空间无任何 RRSA 绑定"; fi
+
+# A.2 网络：default 命名空间存在 NetworkPolicy（default-deny 起点）
+check "A.2 default 命名空间已有 NetworkPolicy" \
+  bash -c 'kubectl get netpol -n default -o json | jq -e ".items | length > 0"'
+
+# A.1 准入：全集群无 :latest 镜像（应=0）
+LATEST=$(kubectl get deploy -A -o json \
+  | jq -r '.items[].spec.template.spec.containers[].image' | grep -c ':latest$')
+count_fail "A.1 无 :latest 镜像引用" "$LATEST"
+
+# A.1 准入：Deployment 声明 runAsNonRoot（抽查全量，应全部为 true）
+check "A.1 Deployment 全部声明 runAsNonRoot" \
+  bash -c 'kubectl get deploy -A -o json | jq -e "[.items[].spec.template.spec.securityContext.runAsNonRoot] | all(. == true)"'
+
+# A.6 审计：审计日志采集组件在位（ACK 托管审计部署于 kube-system；名称以实际组件为准）
+check "A.6 集群审计日志组件在位" \
+  bash -c 'kubectl get deploy,ds -n kube-system -o json | jq -e "[.items[].metadata.name] | any(test(\"audit\"; \"i\"))"'
+
+echo "----------------------------------------"
+echo "汇总：PASS=$PASS FAIL=$FAIL  （FAIL>0 按附录 A 对应节处置；本脚本为只读示例，接入 CI 前先在测试集群验证判定条件）"
+```
+
+用法：`./security-baseline-check.sh | tee baseline-report.txt`——报告随台账归档（13.4），趋势异常（如 LATEST 计数上涨）直接开整改项。墨丘里商城 demo-prod 集群的一次典型输出（能想象输出，才算会用）：
+
+```text
+PASS  A.3 集群内无 AK/SK 明文
+FAIL  A.1 无 :latest 镜像引用（检测到 3 处）   ← payment-api 三个 Deployment 还挂着 :latest，当场开整改项
+汇总：PASS=5 FAIL=1  （FAIL>0 按附录 A 对应节处置…）
+```

@@ -2,6 +2,7 @@
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（精简锁版） ｜ 状态：终审中 -->
 
 > 本章定位：讲清 CRI 运行时标准演进与 Containerd/runc 生产运维，聚焦容器生命周期与高频故障闭环。精简锁版，不展开深度内核隔离。全书生态锁定托管 K8s：ACK/EKS 的工作节点运行时同样是 containerd——节点面是运维的责任田（4.2），本章即以「托管节点的运行时排障」视角深化。
+> **主线定位**：本章为运行时是 L1 调谐闭环的执行末端——期望状态的最终落点在节点面（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
 
 > **边界声明**：本章只讲运行时生产运维，不展开深度内核隔离与安全沙箱（gVisor/Kata 等）、不展开 AI 容器化（第 17 章）。超出部分归 V2。
 
@@ -51,14 +52,14 @@ kubectl get nodes -o custom-columns='NODE:.metadata.name,RUNTIME:.status.nodeInf
 crictl version    # Server 行 = containerd 实际版本
 ```
 
-- GC：镜像清理的主旋钮是 kubelet 的 `imageGCHighTimeThreshold/LowTimeThreshold`（默认 85/80，完整配置段见 6.3）；containerd 侧废弃快照由其内部 GC 调度器回收（containerd 2.x 起可在 `config.toml` 配置触发参数，字段随版本演进，以官方文档为准）。
+- GC：镜像清理的主旋钮是 kubelet 的 `imageGCHighThresholdPercent/LowThresholdPercent`（默认 85/80，完整配置段见 6.3）；containerd 侧废弃快照由其内部 GC 调度器回收（containerd 2.x 起可在 `config.toml` 配置触发参数，字段随版本演进，以官方文档为准）。
 - 拉取加速：私有仓库 mirror + `max_concurrent_downloads`（配置节选见 6.2 ③；AI 大镜像尤其重要，第 17 章）。
 - 云映射：ACK 节点池自动升级在维护窗口滚动节点，containerd 随节点系统升级统一版本（4.4）；EKS 对照：托管节点组滚动更换 AMI，Bottlerocket 以不可变 OS 整机替换实现升级，containerd 由发行版统一管理。
 - 运行时配置版本化，变更走 Git（第 9 章）。
 
 ### 典型故障案例
 
-某节点磁盘 100% 告警，Pod 纷纷 Evicted。根因：containerd GC 阈值默认过高，废弃镜像层长期堆积。配 GC 触发阈值 + 磁盘水位告警后，磁盘稳定在安全水位。
+某节点磁盘 100% 告警，Pod 纷纷 Evicted。根因：**kubelet** 镜像 GC 未显式配置且长期未触发，废弃镜像堆积。显式配置 kubelet 镜像 GC 阈值 + 磁盘水位告警后，磁盘稳定在安全水位。
 
 点评：**运行时不是装完就完的组件——GC / 版本 / 配置三件套不运维，磁盘和排查都会还债**。
 
@@ -125,6 +126,22 @@ flowchart LR
 | **快照（snapshotter）** | 为容器构造 rootfs（镜像层只读 + 可写层，默认 overlayfs） | 驱动选型、磁盘/inode 占用 |
 | **cgroup** | 限制/隔离容器 CPU/内存/IO（K8s limit 最终落到这里） | limit 配置、避免误杀（第 7 章） |
 
+**containerd 数据模型速览**（理解 `/var/lib/containerd` 为什么长那样的三块知识）：
+
+| 部件 | 职责 | 磁盘落点 |
+|---|---|---|
+| **content store** | 镜像层的实际内容，按内容 sha256 寻址（同层全局唯一，天然去重） | `io.containerd.content.v1.content/` |
+| **snapshotter** | 快照树：只读层按序叠加 + 可写层，组装出容器 rootfs（overlayfs） | `io.containerd.snapshotter.v1.overlayfs/` |
+| **metadata** | 元数据库（bolt 引擎）：绑定"镜像→层→快照→容器"的关系账本 | `io.containerd.metadata.v1.boltdb/`（containerd 1.x；2.x 为 `...v1.bolt/`——以节点实际 `ls /var/lib/containerd` 为准） |
+
+先做一个思想实验（先自己想答案，再往下读）：
+
+> 节点磁盘使用 91%（一块 500GB 盘只剩 45GB）告警，你删掉 3 个大镜像的容器想腾空间，`df -h` 一看——纹丝不动。先猜：空间去哪了？
+
+揭晓：删容器删掉的只是**快照与元数据记录**；镜像层的实际内容（content store）要等 **GC 引用计数归零**才释放——这批层还被别的容器引用着，**已退出（Exited）的容器同样算引用**，计数不归零，一个字节都不还你。真正回收要走 `crictl rmi --prune`：它清的是"未被任何容器使用的镜像"，只有这种镜像的层引用才归零、被 GC 收走。这一猜把上面三块数据模型变成排障直觉：**crictl 删的是"账"（快照/元数据），GC 收的才是"货"（content）**。
+
+三者关系一句话：**content 存"内容"、snapshotter 存"组装结果"、metadata 记"谁是谁"**——拉镜像先写 content 再按层建快照；删容器删的是快照与元数据记录，层内容要等 GC（引用计数归零）才真正释放。这就是"删了容器磁盘没降"的原理，6.4 ③ 的磁盘排障直接建立在这个模型上。
+
 权衡的核心：**镜像复用省磁盘但层依赖复杂；overlayfs 快但占 inode；cgroup 严限隔离强但可能误杀**。生产按负载特性调这三者。
 
 ### 最小可行方案
@@ -143,7 +160,7 @@ flowchart LR
 # /etc/crictl.yaml —— crictl 默认配置（ACK/EKS 标准节点已预置；自管节点手工放置）
 runtime-endpoint: unix:///run/containerd/containerd.sock   # 生产禁改：与 containerd 监听地址一致
 image-endpoint: unix:///run/containerd/containerd.sock     # 生产禁改：镜像操作走同一 socket
-timeout: 30s    # 可调：pull GB 级镜像等长操作调大，避免中途被掐断
+timeout: 2m     # 默认 2m0s、勿调小：GB 级镜像拉取（6.4 ② 基线 2min 内）需要完整预算，避免中途被掐断
 debug: false
 ```
 
@@ -169,7 +186,7 @@ sudo crictl inspect <container-id>   # 退出原因/挂载/cgroup 细节（配 6
 | `crictl info` | runtimeVersion / snapshotter | 版本漂移（6.1）、snapshotter 非 overlayfs |
 | `crictl inspect` | status.reason / exitCode / mounts | reason=OOMKilled、mount 缺失（第 8 章） |
 
-> crictl 还有 `inspectp`（Pod 沙箱详情）、`inspect-rp`（运行时 Pod 信息，crictl ≥1.31 引入）等子命令，参数用法以 crictl 官方文档为准。
+> crictl 还有 `inspectp`（Pod 沙箱详情）、`inspecti`（镜像详情）、`imagefsinfo`（imagefs 已用/可用字节，6.4 ③ 用到）、`statsp`（Pod 级资源统计）等子命令，参数用法以 crictl 官方文档为准。
 
 **③ config.toml 生产只盯 3 项**（其余保持托管默认，全文结构与 2.x 版本调整以 containerd 官方文档为准）：
 
@@ -194,10 +211,10 @@ sudo du -sh /var/lib/containerd/* 2>/dev/null | sort -rh | head -5    # 占用�
 |---|---|---|
 | `io.containerd.content.v1.content/` | 镜像层原始 blob | 大头，常见 50% 以上 |
 | `io.containerd.snapshotter.v1.overlayfs/` | 镜像层组装 + 容器可写层 | 大头，常见 30% 以上 |
-| `io.containerd.metadata.v1.bolt/` | 元数据库 | MB 级，可忽略 |
+| `io.containerd.metadata.v1.boltdb/`（1.x；2.x 为 `...v1.bolt/`） | 元数据库 | MB 级，可忽略 |
 | （不在 containerd 内）`/var/log/pods/` | 容器日志，kubelet 轮转 | 磁盘满第二来源（6.4 ③） |
 
-数字参考：通用负载节点两周常堆积 20–60GB 镜像层；vLLM/CUDA 类 AI 镜像单镜像 10–20GB（第 17 章）——GPU 节点池不配 mirror + 并发下载，一次冷启动拉取就能拖垮发布窗口。
+数字参考：通用负载节点两周常堆积 20–60GB 镜像层；vLLM/CUDA 类 AI 镜像单镜像 10–20GB（第 17 章）——GPU 节点池不配 mirror + 并发下载，一次冷启动拉取就能拖垮发布窗口。数字体感：20–60GB 折算下来是**每天静悄悄净增 1.5–4GB**，一个多月吃掉一块 100GB 盘的大半；10–20GB 约等于**一次系统大版本更新包的体量**——节点磁盘按 GB 记的账，到 GPU 池这里直接翻倍。
 
 云映射：ACK 节点已预配内网 pause 镜像地址，ACR 企业版实例提供 VPC 内网访问链路加速拉取（以 ACR 官方文档为准）；运行时配置变更走节点池自定义配置/自定义镜像统一下发，不逐台改文件（4.4）。EKS 对照：标准 AMI 的 containerd 可经托管节点组 launch template 的 user data 调整；Bottlerocket 为不可变 OS，不开放逐台改配置，mirror 等需求经其设置 API 统一下发（以 Bottlerocket 官方文档为准）。
 
@@ -257,6 +274,13 @@ sudo du -sh /var/lib/containerd/* 2>/dev/null | sort -rh | head -5    # 占用�
 | **节点压力** | evictionHard 硬阈值 + 镜像 GC 阈值显式化 | 早驱逐丢副本 vs 晚驱逐坏节点 |
 | **隔离** | 非特权、最小 capabilities、不用 hostPath | 调试不便但安全 |
 
+**镜像 GC 与驱逐的保证等级**（kubelet 到底承诺什么——拿到确切契约，而非模糊安全感）：
+
+| 机制 | 承诺 | 不承诺 |
+|---|---|---|
+| **镜像 GC（High 85 / Low 80）** | 磁盘越过 High 阈值后**最终**清理到 Low 以下——收敛性有保证 | 清理时点：周期 + 条件触发，可能滞后于你的告警与预期；镜像去留：按最后使用时间（LRU）淘汰、使用中的除外——**不承诺保住"你最喜欢的镜像"** |
+| **节点驱逐（evictionHard）** | 越过硬阈值**必然**驱逐（imagefs 15% 驱逐线 = **磁盘只剩约六分之一时系统开始自保**） | 驱逐顺序符合业务优先级：按 QoS/优先级排——**配错的先死**，BestEffort 的关键业务会先于配好 limit 的边缘任务被清场 |
+
 驱逐顺序与 QoS（BestEffort → Burstable → Guaranteed）、优先级的影响展开归第 7 章；namespace 级默认值兜底用 LimitRange（7.4）。
 
 ### 最小可行方案
@@ -280,11 +304,21 @@ evictionHard:                 # 硬阈值：触达即立刻驱逐（软阈值 ev
   imagefs.available: "15%"    # 可调：默认 15%——镜像盘可用 <15% 触发驱逐；GPU 大镜像池建议 20%
   nodefs.available: "10%"     # 可调：默认 10%——节点根盘可用 <10% 触发驱逐
   memory.available: "100Mi"   # 可调：默认 100Mi——大内存机型（≥64GiB）建议 500Mi–1Gi
-imageGCHighTimeThreshold: 85  # 可调：默认 85——镜像盘已用 >85% 开始删除未使用镜像
-imageGCLowTimeThreshold: 80   # 可调：默认 80——清理到已用 80% 停止（必须 < High）
+imageGCHighThresholdPercent: 85  # 可调：默认 85——镜像盘已用 >85% 开始删除未使用镜像
+imageGCLowThresholdPercent: 80   # 可调：默认 80——清理到已用 80% 停止（必须 < High）
 ```
 
 三个配套事实：镜像 GC 删除的是"未被任何容器使用的镜像"（与 6.4 ③ 的手动清理同口径）；imagefs 默认与 nodefs 同盘（containerd 数据在 /var/lib/containerd，云上可挂数据盘分离）；GC 生效的前提是水位可观测——告警线建议 75%，先于 85% 的 GC 线（第 12 章）。
+
+85/80 不是普适常数，能不能照抄默认值取决于三个变量（每类节点池过一遍）：
+
+| 决策变量 | 可贴近默认 85/80 | 应下调阈值（如 80/75，更早触发） |
+|---|---|---|
+| **磁盘总量** | 大盘（≥200GB）：用到 85% 仍剩 30GB 余量 | 小盘（<100GB）：到 85% 只剩十几 GB，一两个大镜像就见顶 |
+| **镜像更新频率** | 镜像集稳定、发布稀疏 | 高频发布、多版本并存——层堆积快，越晚清越被动 |
+| **可用性敏感度** | 容忍 GC 后首批 Pod 冷拉取的延迟 | imagefs 越线 = 成片 Evicted——敏感池宁可早清，让 GC 线远离 15% 驱逐线 |
+
+数字体感：High 与 Low 之间这 5 个百分点是 GC 的"缓冲带"——200GB 盘上约 10GB，恰是一个 AI 镜像的体量；带太窄 GC 频繁起停，带太宽一次清理抖掉的镜像太多。
 
 **② 生命周期规范制品**（Pod spec 节选，最小权限模板见附录 A）：
 
@@ -305,6 +339,8 @@ spec:
       requests: {cpu: 500m, memory: 512Mi}   # 可调：requests 决定调度与驱逐顺序（第 7 章）
       limits:   {cpu: "2",  memory: 2Gi}     # 可调：limits 落到 cgroup（6.2），防 noisy neighbor
 ```
+
+> 深度提示：**preStop 执行时间与进程退出共享 terminationGracePeriodSeconds 预算**，超时即 SIGKILL——配长 preStop sleep 必须同步调大 grace period。
 
 云映射：ACK 节点池支持自定义 kubelet 配置，随节点池滚动升级统一下发（4.4，不逐台改）；EKS 对照：托管节点组经 launch template user data 传 `--kubelet-extra-args`，Bottlerocket 经设置 API 管理 kubelet 参数（以官方文档为准）。数字基线：驱逐三项 15%/10%/100Mi、镜像 GC 85/80、Web 服务 grace 45s、推理负载 grace ≥120s。
 
@@ -335,6 +371,7 @@ spec:
 - [ ] 就绪是否用 readiness 探针控制流量接入？
 - [ ] 终止是否配 preStop + 按负载差异化的 grace period（AI/有状态加长）？
 - [ ] evictionHard 三项与镜像 GC 85/80 已显式化进 kubelet 基线（非默认隐形）？
+- [ ] 能复述镜像 GC 与驱逐的"承诺/不承诺"（越过 High 最终清到 Low、越线必逐，但不保时点、不保镜像、不按业务优先级）？
 - [ ] 是否遵循最小权限隔离（非 root/最小 capabilities/禁 hostPath）？
 
 ---
@@ -398,6 +435,8 @@ sudo crictl inspect <cid> | grep -E '"reason"|"exitCode"'    # reason=OOMKilled/
 ```
 
 退出码速查：`137` = 128+9 被 SIGKILL（OOM 或 liveness 失败被杀，7.1）；`143` = 128+15 收到 SIGTERM（正常终止路径）；`1` = 应用自身错误（直接看 logs）；`139` = 段错误（应用缺陷）。
+
+> 深度补充：CrashLoopBackOff 的指数退避在容器**稳定运行一段时间后会重置回 10s**（非永久递增）；与 ImagePullBackOff 的区分看 Events 消息原文——拉取失败走 ② 分诊，启动/退出失败走本段三连。
 
 **② 镜像拉取失败：三层分诊（DNS / 凭据 / 带宽超时）**
 

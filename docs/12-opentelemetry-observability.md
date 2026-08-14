@@ -2,6 +2,7 @@
 <!-- 第四篇 可观测与稳定性 ｜ 常规章（技术栈永久锁死） ｜ 状态：终审中 -->
 
 > 本章定位：第四篇开篇，建立全域可观测体系，是全书可观测体系的技术栈锚点——后续所有观测章节与 AI 负载可观测（第 18 章）均复用本章技术栈。全书生态为托管 K8s（阿里云 ACK 主参考、AWS EKS 对照），本栈作为自建锁死栈跑在托管集群之上；「托管可观测 vs 自建」的取舍在 12.1 用决策表一次定调。
+> **主线定位**：本章为L2 运维自治的输入——全域信号采集，风险识别的源头（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
 
 > **技术栈锁死（永久不变）**：可观测栈 = VictoriaMetrics（指标）、Loki（日志）、Tempo（链路）、OpenTelemetry（采集）、Grafana（可视化）；告警链路 = vmalert + Alertmanager（与第 13 章一致）；交付 = Helm/ArgoCD。不引入 Prometheus / ELK / Jaeger 等任何替代组件。
 > **去工具化说明（原理优先）**：本章真正要讲的是**可观测的底层逻辑**——三支柱协同、trace ID 贯穿关联、低成本存储 + 统一可视化。这套逻辑与具体组件无关，换成任何等价栈同样适用；锁死 VM/Loki/Tempo 是选一个参考实例保证全书落地一致，不是判定其他栈不可用（组件对比归 V2）。
@@ -34,48 +35,48 @@
 
 **再理清三支柱协同的四条底层事实**（决定"跳转"怎么做）：
 
-**事实一：指标分"生产侧"和"采集侧"，不是两个并行数据源。** 生产侧（OTel SDK、exporter）把指标造出来放进 `/metrics` 并可盖 exemplar 戳；采集规则（PodMonitor/ServiceMonitor）+ 采集器（vmagent）只是按规则去拉；存储（VM）落盘供查询。exemplar 是生产侧盖的戳，vmagent 只是搬运回来——**加 PodMonitor 不会凭空多出 exemplar**。链路成立需三处同时支持（应用 SDK 开注入、vmagent 透传、Grafana 渲染），任一环节版本过旧都拿不到——版本前提，非协议天然免费。
+**事实一：指标分"生产侧"和"采集侧"，不是两个并行数据源。** 生产侧（OTel SDK、exporter）把指标造出来放进 `/metrics` 并可盖 exemplar 戳；采集规则（PodMonitor/ServiceMonitor）+ 采集器（vmagent）只是按规则去拉；存储（VM）落盘供查询。但有一个**锁死栈的硬边界必须先讲：VictoriaMetrics（含企业版）不支持 exemplar 的存储与查询**（`query_exemplars` 接口只是返回空结果的兼容层，官方明确尚未实现）。所以本书的指标→trace 通道**不走 exemplar**，走"时间窗 + 服务 + 时长"的 TraceQL 检索与 Grafana 关联跳转（事实二与 12.5 ④）——Prometheus 原生栈才有 exemplar 星点，这是选型时要知道的取舍。
 
-**事实二：trace 和 metric 是同一次调用的两个产物，exemplar 是桥。** 一次 A 调 B 被 OTel 自动埋点**同时**产出 span（进 Tempo）+ RED 指标（进 VM）；exemplar 是 metric 数据点上指向 trace_id 的指针，不创造新数据（全景数据流见本章收束图）。
+**事实二：trace 和 metric 是同一次调用的两个产物，"时间窗 + 维度"是桥。** 一次 A 调 B 被 OTel 自动埋点**同时**产出 span（进 Tempo）+ RED 指标（进 VM）；VM 无 exemplar 时，两侧靠**同一时间窗 + 同一维度（service/route）**关联：指标定位"checkout 在 10:03–10:07 错误率 8%、p99 3s"→ 去 Tempo 按 `service=checkout AND status=error AND duration>2s` 的时间窗检索，直接命中慢/错 trace（TraceQL，12.5 ④）。
 
-**事实三：exemplar 只挂 RED 层，业务计数器与基础设施指标靠时间关联。**
+**事实三：能"串到 trace"的只有 RED 层，业务计数器与基础设施指标先串 RED 再串 trace。**
 
-| 指标类 | 例子 | 关联方式 | 能否 exemplar 串 |
+| 指标类 | 例子 | 串到 trace 的通道 |
 |---|---|---|---|
-| RED（每请求性能） | 延迟/错误率/QPS | exemplar 直接挂 | ✓ 能（原生或 spanmetrics） |
+| RED（每请求性能） | 延迟/错误率/QPS | 时间窗+维度 → Tempo TraceQL | ✓ 能（原生指标或 spanmetrics） |
 | 业务（聚合计数） | 订单数/支付额 | 时间 + RED 桥 | ✗ 不该串 |
 | 基础设施 | CPU/GPU/内存 | 时间 + RED 桥 | ✗ 不该串 |
 
 业务指标报警（出事了）→ 同时刻 RED（哪类请求）→ RED 的 exemplar 跳 trace（为什么）。**业务计数器串不上 exemplar 是对的——它该串的是"同时刻的 RED"**。
 
-**事实四：被调服务没暴露指标时，用 spanmetrics 从 trace 反推 RED，且天然带 exemplar。** 老服务/第三方只接了 trace、没暴露 metric → spanmetrics（OTel Collector 连接器或 Tempo metrics-generator，12.5）把 span 聚合成 RED 指标 remote_write 进 VM，数据点天然带 exemplar。RED 层推荐统一交给 spanmetrics 兜底。
+**事实四：被调服务没暴露指标时，用 spanmetrics 从 trace 反推 RED。** 老服务/第三方只接了 trace、没暴露 metric → spanmetrics（Tempo metrics-generator，12.5 ③）把 span 聚合成 RED 指标 remote_write 进 VM——指标虽无 exemplar（VM 侧无此概念），但 service/route/status 维度与时间窗齐全，照样走事实二的 TraceQL 桥。RED 层推荐统一交给 spanmetrics 兜底。
 
 权衡的核心：**协同不是一句"trace ID 关联 + 指标带 exemplar"，而是建立在这四条事实上**——理解四条，"串不上"自动消解。
 
 ### 最小可行方案
 
-1. **统一采集 + 统一关联键**：OTel 统一采集层（三支柱同源，12.2）；全链路 trace ID、日志带 trace ID、RED 层带 exemplar（业务/基础设施不挂）。
-2. **RED 层永远在线 + 统一可视化**：原生 HTTP 指标 + spanmetrics 兜底；Grafana 三数据源按 trace ID / exemplar 跳转。
+1. **统一采集 + 统一关联键**：OTel 统一采集层（三支柱同源，12.2）；全链路 trace ID、日志带 trace ID、RED 层靠时间窗+维度可下钻 trace（业务/基础设施指标先串 RED）。
+2. **RED 层永远在线 + 统一可视化**：原生 HTTP 指标 + spanmetrics 兜底；Grafana 三数据源按 trace ID 跳转 + 面板数据链接（correlation）预置 TraceQL 下钻。
 
 ### 生产落地实现
 
 **exemplar 链路三前提自检**（新服务接入可观测的验收命令）：
 
 ```bash
-kubectl -n observability get vmpodscrape,vmservicescrape | head   # ① 采集规则在位（VM Operator CR）
+kubectl -n observability get vmagent   # ① 采集在位（本章方案用 VmAgent 的 inlineScrapeConfig，不建 PodMonitor/ServiceMonitor CR）
 kubectl -n prod exec deploy/checkout -- \
   curl -s -H 'Accept: application/openmetrics-text; version=1.0.0' http://localhost:8080/metrics | grep -m1 'trace_id'   # ② exemplar 戳已盖
-curl -sG 'http://vmstack-victoria-metrics.observability.svc:8429/api/v1/query_exemplars' \
+curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
   --data-urlencode 'query=http_server_request_duration_seconds_bucket{service="checkout"}' \
-  --data-urlencode 'start=-1h' --data-urlencode 'end=now' | jq '.data.list | length'   # ③ 集群版换 vmselect:8481（以官方文档为准）
+  --data-urlencode 'query=traces_spanmetrics_calls_total' | jq '.data.result | length'   # ③ spanmetrics 已回写 VM（VM 无 exemplar，指标→trace 走 TraceQL 时间窗检索）
 ```
 
-- **关联排查标准路径**：业务指标报警（时间点）→ 同时刻 RED（有 exemplar）→ 点 exemplar 跳 Tempo → 按 trace ID 跳日志（查询三连见 12.5）；无指标服务由 spanmetrics 兜底。
+- **关联排查标准路径**：业务指标报警（时间点）→ 同时刻 RED（定位服务与路由）→ Tempo 按 service+时间窗+时长检索命中 trace（12.5 ④）→ 按 trace ID 跳日志（查询三连见 12.5）；无指标服务由 spanmetrics 兜底。
 - **云服务映射与数字**：托管对照 = 阿里云 ARMS（指标+应用监控+链路一体）、AWS AMP+AMG（PromQL+托管 Grafana），exemplar→Tempo 这类跨支柱打通需自建，取舍见本节决策表；自建栈默认留存 = 指标 30d / 日志 30d / 链路 14d（12.2/12.4/12.5 可调），而托管侧 CloudWatch 1 分钟粒度仅 15 天——长留存是选自建的第一个常见理由。
 
 ### 典型故障案例
 
-某次排查订单成功率（业务计数器，挂不了 exemplar）下降，团队卡在"怎么跳 trace"。按 RED 桥：看同时刻 RED，发现 checkout 错误率飙且带 exemplar → 跳到失败 trace → 支付网关超时。
+某次排查订单成功率（业务计数器，挂不了 exemplar）下降，团队卡在"怎么跳 trace"。按 RED 桥：看同时刻 RED，发现 checkout 路由错误率飙 → 按异常时间窗在 Tempo 检出失败 trace → 支付网关超时。
 
 点评：**三支柱协同的真实难点不在工具，而在搞清"exemplar 挂哪一层、哪些指标靠桥"**。
 
@@ -126,7 +127,7 @@ curl -sG 'http://vmstack-victoria-metrics.observability.svc:8429/api/v1/query_ex
 | **OpenTelemetry** | 采集 | 厂商中立标准，三支柱统一采集 |
 | **Grafana** | 可视化 | 统一面板，三数据源原生关联 |
 
-规模分界：**vmsingle 单副本扛 300–500 万活跃序列**（12.3 红线）；超限换 vmcluster（vminsert/vmselect/vmstorage 分离），写入端点变为 `http://vminsert:8480/insert/0/prometheus/api/v1/write`、查询走 `vmselect:8481`（以官方文档为准）。权衡的核心：**这套栈以"低成本 + 高协同 + 标准化"为选型核心**，本书永久锁死，不引入替代组件。
+规模分界：**vmsingle 单副本扛 300–500 万活跃序列**（12.3 红线）；超限换 vmcluster（vminsert/vmselect/vmstorage 分离），写入端点变为 `http://vminsert:8480/insert/0/prometheus/api/v1/write`、查询走 `vmselect:8481/select/0/prometheus`（集群版必须带租户路径前缀，缺了 404，以官方文档为准）。权衡的核心：**这套栈以"低成本 + 高协同 + 标准化"为选型核心**，本书永久锁死，不引入替代组件。
 
 ### 最小可行方案
 
@@ -155,7 +156,7 @@ vmsingle:
       storageClassName: alicloud-disk-essd      # AWS 对照: gp3；生产禁改: 严禁 local/emptyDir
       resources:
         requests:
-          storage: 200Gi                        # 可调: 按 12.3 容量公式估算（示例≈300万序列×30d）
+          storage: 300Gi                        # 可调: 按 12.3 容量公式估算（300 万序列×30d 上界 105–260GB，留余量取 300Gi）
 vmagent: {}        # chart 默认已接 vmsingle 写入端点，并自动创建 kubelet/cAdvisor/kube-state-metrics/node-exporter 抓取
 vmalert:
   spec:
@@ -170,7 +171,7 @@ grafana:
       enabled: true    # 数据源走 ConfigMap provisioning（12.5）
 ```
 
-**托管对照一行**：阿里云 ARMS Prometheus/SLS、AWS AMP+AMG/CloudWatch 可等价托管，<50 节点省心；规模化后自建常见可降 50%+（12.1 决策表，以实测账单为准）。**成本量级**：vmsingle 200Gi ESSD ≈¥100/月（≈¥0.5/GB/月；AWS gp3 ≈$0.08/GB/月，以官网当期价为准）；vmagent→vmsingle 走集群内网，零公网流量费。
+**托管对照一行**：阿里云 ARMS Prometheus/SLS、AWS AMP+AMG/CloudWatch 可等价托管，<50 节点省心；规模化后自建常见可降 50%+（12.1 决策表，以实测账单为准）。**成本量级**：vmsingle 300Gi ESSD ≈¥150/月（≈¥0.5/GB/月；AWS gp3 ≈$0.08/GB/月，以官网当期价为准）；vmagent→vmsingle 走集群内网，零公网流量费。
 
 ### 典型故障案例
 
@@ -203,7 +204,15 @@ grafana:
 
 ### 生产问题
 
-指标采集无标准：暴露随意（有的服务有 `/metrics` 有的没有）、标签各写各的、基数失控（user_id 当 label 导致序列爆炸）、四层维度割裂。**无标准的指标难查询、难关联、成本失控——高基数 label 是指标成本的头号杀手**。
+先做一个思想实验（先自己想答案，再往下读）：
+
+> 墨丘里商城的 Grafana 大盘上，demo-api 的平均延迟 40ms，全绿，一切正常。但客服转来用户投诉："**每 20 单就有 1 单卡 3 秒**才出结果。"先猜十秒：监控为什么没报？
+
+揭晓：把这 1000 次调用摊开——990 次 10ms、10 次 3000ms。均值 =（990×10 + 10×3000）÷ 1000 ≈ 40ms，仪表盘没有骗你；但 p99 = 3000ms。**均值把尾部的痛苦平均掉了**：10 个"3 秒"摊到 1000 个请求头上，每个只分摊 30ms，而真正挨那 3 秒的用户正在打客服电话——3 秒，够用户怀疑断网、切去竞品再下一次单。均值是统计的真相，p99 才是用户的真相。
+
+再深一层（DDIA 的"尾部放大"）：微服务下尾部延迟会沿调用链二次放大。用户下一次单，demo-api 在后台扇出约 20 次调用（user-svc 查用户、payment-api 预授信，再加库存/价格/优惠券/风控等）——**任何一次落入慢尾，整个请求就慢**。设单次调用落入慢尾的概率为 p，用户请求变慢的概率就是 1-(1-p)²⁰：p=1%（恰好是 p99=3000ms 的情形）→ ≈18%，每 5~6 单就有 1 单慢；哪怕 p 只有 0.25%，也有 ≈5%——正是客服说的"每 20 单 1 单"。**服务自评只慢 0.25%，到用户侧就是 5%，20 倍放大**——这就是为什么微服务必须看调用方视角的 p99，而不是各服务自评的均值：每一环都"均值正常"，串起来的链路却在崩溃。
+
+均值掩盖尾部、自评掩盖链路，这是"指标度量错"；本节的另一半问题是"指标采集无标准"：暴露随意（有的服务有 `/metrics` 有的没有）、标签各写各的、基数失控（user_id 当 label 导致序列爆炸）、四层维度割裂。**无标准的指标难查询、难关联、成本失控——高基数 label 是指标成本的头号杀手**。
 
 ### 传统方案失效原因
 
@@ -234,7 +243,16 @@ grafana:
 | 采集间隔 | 基础设施 30s；RED 15–30s | 禁 5s 以下（存储×6） |
 | 落盘占用 | ≈0.4–1 字节/样本（官方口径≈0.4B） | 容量公式见落地实现 |
 
+**百分位与采样的保证等级表**（p99 与采样各自承诺什么——本节开头思想实验的机制总结）：
+
+| 机制 | 承诺 | 不承诺 |
+|---|---|---|
+| **百分位数（p50/p99）** | 刻画分布形态：单个窗口内尾部有多慢，一目了然 | 跨实例/跨窗口可直接平均——先算各实例 p99 再取均值 ≠ 全局 p99（"均值 40ms"的谎言在聚合层原样重演）。**聚合必须在原始直方图（histogram 的 le 桶）上重算分位数**，`histogram_quantile(sum by (le)(rate(..._bucket[5m])))` 正是为此设计（12.5 查询三连第 1 连） |
+| **head 采样（12.5）** | 长期比例收敛：1% 采样在大样本下约 1% 的 trace 被记录 | 任何一条具体 trace 被捕获——1% 采样 = **99% 的 trace 未被记录**，"这次异常偏偏没 trace"是概率常态而非系统故障；异常 trace 的确定性捕获靠尾采样（错误/慢必留，12.5；深度策略归 V2） |
+
 权衡的核心：**标准化用"来源/命名/标签/基数规范"换"可查询、可关联、成本可控"**——黄金信号（延迟/流量/错误/饱和度）全覆盖 + 统一 label + 严控基数。
+
+**vmsingle → vmcluster 升级路径**（300–500 万序列红线触发时的预案，兑现 12.2"单机到集群只换拓扑不改栈"的承诺）：前兆信号——活跃序列连续两周逼近红线、查询延迟抬升。三步（组件与参数以官方文档为准）：① 部署 vmcluster（vminsert/vmselect/vmstorage 分离，vmstorage 按序列数水平扩展）；② 历史数据用 vmbackup/vmrestore 迁移，或按保留期自然滚动 + 双写过渡一个周期；③ vmagent 写入端点切 `vminsert:8480/insert/0/prometheus/api/v1/write`、Grafana 数据源切 `vmselect:8481`。切换是拓扑变更而非换栈——vmalert/Grafana/告警规则全部不动。
 
 ### 最小可行方案
 
@@ -278,14 +296,14 @@ vmagent:
 **② 基数巡检**（低频执行——每周一次；勿做高频告警，全序列扫描本身有开销）：
 
 ```bash
-curl -sG 'http://vmstack-victoria-metrics.observability.svc:8429/api/v1/query' \
+curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
   --data-urlencode 'query=count({__name__!=""})' | jq '.data.result[0].value[1]'   # 全局序列（对照 300–500 万红线）
-curl -sG 'http://vmstack-victoria-metrics.observability.svc:8429/api/v1/query' \
+curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
   --data-urlencode 'query=topk(10, count by (__name__)({__name__!=""}))' \
   | jq -r '.data.result[] | "\(.value[1]) \(.metric.__name__)"'   # 基数 Top10（对照单指标 1 万红线）
 ```
 
-**③ 容量估算**：样本量/天 = 活跃序列数 × 86400 ÷ 采集间隔；例：300 万序列 @30s → ≈86.4 亿样本/天 → 落盘 ≈3.5–8.6 GB/天 → 30 天 ≈105–260 GB → 云盘 300–500Gi 起步。规模参考：单节点（node_exporter+cAdvisor）≈0.5万–1.5万序列；kube-state-metrics 全集群 5万–20万（视对象数）。
+**③ 容量估算**：样本量/天 = 活跃序列数 × 86400 ÷ 采集间隔；例：300 万序列 @30s → ≈86.4 亿样本/天（平均每秒 10 万个样本点持续落盘）→ 落盘 ≈3.5–8.6 GB/天 → 30 天 ≈105–260 GB → 云盘 300–500Gi 起步。规模参考：单节点（node_exporter+cAdvisor）≈0.5万–1.5万序列；kube-state-metrics 全集群 5万–20万（视对象数）。
 
 **④ 云服务映射**：node_exporter 跑在 ACK 节点池/EKS 托管节点组（DaemonSet，节点自动修复保证采集自愈——4.2）；存储落阿里云 ESSD 云盘（对照 EBS gp3）；托管对照 = ARMS Prometheus/AMP 免自建抓取与存储、按量计费（取舍见 12.1 决策表）。
 
@@ -313,6 +331,7 @@ curl -sG 'http://vmstack-victoria-metrics.observability.svc:8429/api/v1/query' \
 - [ ] 四层来源全接入（node_exporter/cAdvisor/kube-state-metrics/业务；GPU 待 17 章）？
 - [ ] 每服务黄金信号四类齐（延迟/流量/错误/饱和度）、标签跨服务一致、容量按公式估算留 30% 余量？
 - [ ] 无 user_id 等高基数 label 且活跃序列在红线内（单指标 ≤1 万、全局 ≤300–500 万，巡检周执行）？
+- [ ] 延迟类 SLI 与告警用 p99（调用方视角）而非均值，跨实例聚合分位数在原始直方图上重算？
 
 ---
 ## 12.4 全链路日志采集、检索、脱敏与故障快速定位方案
@@ -330,7 +349,7 @@ curl -sG 'http://vmstack-victoria-metrics.observability.svc:8429/api/v1/query' \
 
 ### 架构约束与权衡
 
-四维治理与权衡：**采集**（OTel filelog DaemonSet → Loki；采集开销 vs 不丢失）、**结构化**（JSON + 标准 label；结构化成本 vs 检索效率）、**脱敏**（采集侧 processor 打码；合规 vs 调试便利）、**关联**（日志带 trace_id ↔ Tempo；关联 vs 独立）。Loki 以"仅索引 label + 对象存储日志体"换低成本，代价是查询依赖 label（非任意全文检索），所以**结构化 + 标准 label 是检索效率的关键**。日志量量级（经验值）：单节点（30–60 Pod）日常 **2–10 GB/天**（未压缩），Loki 压缩常见 5–10×；100 节点 × 30 天 ≈ OSS 1.5–6 TB ≈ **¥180–720/月**（标准存储 ≈¥0.12/GB/月，以官网当期价为准）——这是"日志可以全采"的成本底气，但脱敏必须前置到采集侧。
+四维治理与权衡：**采集**（OTel filelog DaemonSet → Loki；采集开销 vs 不丢失）、**结构化**（JSON + 标准 label；结构化成本 vs 检索效率）、**脱敏**（采集侧 processor 打码；合规 vs 调试便利）、**关联**（日志带 trace_id ↔ Tempo；关联 vs 独立）。Loki 以"仅索引 label + 对象存储日志体"换低成本，代价是查询依赖 label（非任意全文检索），所以**结构化 + 标准 label 是检索效率的关键**。日志量量级（经验值）：单节点（30–60 Pod）日常 **2–10 GB/天**（未压缩——相当于一个人一整天不停手发约 1 万条图文微信的量），Loki 压缩常见 5–10×；100 节点 × 30 天 ≈ OSS 1.5–6 TB ≈ **¥180–720/月**（标准存储 ≈¥0.12/GB/月，以官网当期价为准）——这是"日志可以全采"的成本底气，但脱敏必须前置到采集侧。留存 30 天的体感：一个月前的间歇性故障，今天还能调出当天的日志复现排查——排障窗口就是这么买来的。
 
 ### 最小可行方案
 
@@ -350,7 +369,8 @@ config:
     filelog:
       include: [/var/log/pods/*/*/*.log]
       exclude: [/var/log/pods/observability_*/*/*.log]   # 可调: 排除可观测自身日志防自激
-      start_at: end                                # 生产禁改: 重启从文件尾续读防重复
+      start_at: end                                # 只决定首次读取位置；重启续读防丢重真正依赖 file_storage
+      # checkpoint 持久化（DaemonSet 需挂 volume，否则 Pod 重建 offset 丢失，有重复/漏采窗口，以官方文档为准）
       include_file_path: true
       operators:
         # 1) 从路径提取 ns/pod/容器 → resource（/var/log/pods/<ns>_<pod>_<uid>/<container>/*.log）
@@ -383,9 +403,9 @@ config:
           max_log_size: 5mb                        # 可调: 超长合并上限
   processors:
     k8sattributes:                                 # 补节点/label 元数据（ns+pod 来自路径解析）
-      extract:
+      extract:                                     # labels 提取必须在 extract 之下（顶层写法是旧版遗留，新版会报未知键）
         metadata: [k8s.node.name]
-      labels:
+        labels:
         - tag_name: app
           key: app.kubernetes.io/name
           from: pod
@@ -400,7 +420,8 @@ config:
       log_statements:
         - context: log
           statements:
-            - replace_pattern(body, '(?i)(password|token|secret|authorization)["=:\\s]+\\S+', '${1}=***')
+            # 正则用 [^"\s]* 收尾而非 \S+：贪婪 \S+ 会吞过 JSON 值的闭引号与后续字段，打码后 | json 直接断流
+            - replace_pattern(body, '(?i)(password|token|secret|authorization)["=:\s]+[^"\s]*', '${1}=***')
             - replace_pattern(body, '\\b1[3-9]\\d{9}\\b', '[手机号]')   # 可调: 按合规清单增删
     memory_limiter:
       check_interval: 1s
@@ -492,6 +513,14 @@ singleBinary:
 
 四维治理与权衡：**埋点**（OTel SDK 自动 HTTP/gRPC/DB + 关键跨度手动；侵入成本 vs 完整性）、**采样**（SDK 头采样 + 网关尾采样、错误/慢必留；采样率 vs 成本/捕获率）、**存储**（Tempo + 对象存储按 trace_id 查询；≈20–100 B/span，经验值）、**关联**（trace_id 贯穿指标 exemplar 与日志字段；三支柱协同 12.1）。权衡的核心：**采样是链路成本的总闸门**——头采样省应用→网关带宽，尾采样保异常 trace；两者叠加会相乘（10%×1%=0.1%），常见做法是 SDK 端全量上报、网关统一尾采，流量极大时 SDK 才降头采样。
 
+采样率定在多少，永远"取决于"（变量表）：
+
+| 决策变量 | 倾向高采样（≥10%） | 倾向低采样（≤1%） |
+|---|---|---|
+| 流量大小 | 低流量内部服务，trace 总量本就有限 | demo-api 峰值 QPS 数千的核心链路，全采必先爆网关 |
+| 异常频率 | 偶发难复现问题为主（低采样大概率漏掉唯一现场） | 异常模式已定位（错误/慢靠尾采必留兜底，头采只保基线） |
+| 采集与存储成本 | 预算宽裕（OSS ≈¥0.12/GB/月，存储近乎免费，见 ⑥） | 采集/序列化 CPU 占主导（瓶颈在算力不在存储，见 ⑥） |
+
 ### 最小可行方案
 
 1. **OTel 自动埋点**：主流框架（HTTP/RPC/DB 客户端）自动埋点，关键业务跨度手动补全。
@@ -548,11 +577,16 @@ storage:
       endpoint: oss-cn-hangzhou-internal.aliyuncs.com   # AWS 对照: s3.<region>.amazonaws.com
       region: cn-hangzhou
 metricsGenerator:
-  enabled: true                       # spanmetrics: trace 衍生 RED + exemplar（12.1 事实四）
+  enabled: true                       # 只部署组件还不够——processor 必须在租户 overrides 显式开启（否则一条 spanmetrics 不产）
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics]   # 开启处理器，字段以 chart 版本为准
+metricsGenerator:
   config:
     storage:
       remote_write:
-        - url: http://vmstack-victoria-metrics.observability.svc:8429/api/v1/write   # 指标回写 VM
+        - url: http://vmsingle-vmstack.observability.svc:8428/api/v1/write   # 指标回写 VM
 ```
 
 **④ Grafana 三数据源 provisioning**（ConfigMap，sidecar 自动加载；exemplar 打通的关键段，接 12.2 的 grafana）：
@@ -572,12 +606,12 @@ data:
     - name: VictoriaMetrics
       uid: victoriametrics
       type: prometheus
-      url: http://vmstack-victoria-metrics.observability.svc:8429   # vmsingle 查询端点；集群版换 vmselect:8481（以官方文档为准）
+      url: http://vmsingle-vmstack.observability.svc:8428   # vmsingle 查询端点；集群版换 vmselect:8481（以官方文档为准）
       isDefault: true
-      jsonData:
-        exemplarTraceIdDestinations:      # 指标 → Tempo：exemplar 跳转
-          - name: traceID
-            datasourceUid: tempo
+      jsonData: {}                        # VM 无 exemplar（12.1 事实一）——指标→trace 不配星点跳转，
+                                          # 在面板上配数据链接（correlation）：url 指向 /explore?orgId=1&left=
+                                          # {"datasource":"tempo","queries":[{"expr":'{ resource.service.name="${service}" && duration>${__value}s }'}],"range":${__from}~${__to}}
+                                          # 一键把指标点带到 Tempo 的时间窗+服务+时长检索（④ 查询三连第 2 连）
     - name: Loki
       uid: loki
       type: loki
@@ -603,7 +637,7 @@ data:
 **⑤ trace_id 关联查询三连**（metric → trace → log 的实际查询）：
 
 ```text
-# 1) PromQL（VM 数据源）：定位异常时段与对象；面板点 exemplar 星点直跳 Tempo
+# 1) PromQL（VM 数据源）：定位异常时段与对象；用面板数据链接（correlation）带时间窗跳 Tempo
 histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="checkout"}[5m])))
 # 2) TraceQL（Tempo 数据源，Explore）：直接搜"慢且错"的调用
 { resource.service.name = "checkout" && status = error && duration > 500ms }
@@ -612,7 +646,7 @@ histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_
 # 注: 指标名随 OTel 语义约定版本/exporter 后缀不同（http_server_request_duration_seconds vs http.server.request.duration），以实际 /metrics 输出为准
 ```
 
-**⑥ 成本量级与云服务映射**：100 万请求/天、SDK 头采 10% + 错误/慢必留 → ≈10 万 trace/天；按 30 span/trace、压缩后 ≈20–100 B/span（经验值）→ ≈60–300 MB/天 → 14 天保留 ≈1–4 GB OSS ≈ **每月个位数元**（≈¥0.12/GB/月，以官网当期价为准）——**链路存储近乎免费，真正的成本在采集与序列化 CPU，所以采样闸门设在网关**。trace 存 OSS（对照 S3，内网 endpoint 免流量费）；托管对照 = ARMS 链路追踪 / AWS X-Ray（按量计费、查询语言私有——12.1 决策表）。
+**⑥ 成本量级与云服务映射**：100 万请求/天、SDK 头采 10% + 错误/慢必留 → ≈10 万 trace/天；按 30 span/trace、压缩后 ≈20–100 B/span（经验值）→ ≈60–300 MB/天 → 14 天保留 ≈1–4 GB OSS ≈ **每月个位数元**（≈¥0.12/GB/月，以官网当期价为准）——一杯奶茶钱，买下全公司 14 天的完整链路现场；**链路存储近乎免费，真正的成本在采集与序列化 CPU，所以采样闸门设在网关**。trace 存 OSS（对照 S3，内网 endpoint 免流量费）；托管对照 = ARMS 链路追踪 / AWS X-Ray（按量计费、查询语言私有——12.1 决策表）。
 
 ### 典型故障案例
 

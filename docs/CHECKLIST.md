@@ -76,6 +76,7 @@
 - [ ] ACK 免密组件（RRSA/节点云身份）拉取，无长期 imagePullSecret？
 - [ ] cosign 签名+验签在链路中生效（准入验签指向附录 A）？
 - [ ] 生产镜像引用一律 digest 或不可变 tag（无 `latest`）？
+- [ ] 能复述保证等级表（tag 不承诺内容、扫描不承诺零漏洞、签名不承诺正确）？
 
 ## 第3章 AI原生运维统一范式
 
@@ -130,6 +131,7 @@
 - [ ] 集群版本在云厂商支持矩阵内（4.4）？
 - [ ] 节点多可用区分布、规格统一（`kubectl get nodes -L topology.kubernetes.io/zone` 验证过）？
 - [ ] K8s 不够用的能力是否通过扩展机制补齐（而非另立底座）？
+- [ ] 集群与 VSwitch/节点池/安全组第一天即 Terraform 声明式创建（无控制台手建漂移黑洞）？
 **4.2 控制平面、节点核心组件架构与高可用生产容错逻辑**
 
 - [ ] 集群托管（ACK Pro / EKS），控制面 SLA 归云厂商？
@@ -164,31 +166,33 @@
 
 **5.1 命令式运维与声明式运维的思维本质差异（极简导入）**
 
+- [ ] 理解命令式的死穴是部分失败 × 不幂等（而非"没记录"）？
 - [ ] 运维心智从"执行动作"转向"声明状态"？
 - [ ] 期望状态全部进 Git（无命令式直改生产）？
 - [ ] 由控制器维持稳态（而非手动维持）？
 - [ ] 验证方式是"实际状态 == 期望状态"（而非命令执行成功）？
-- [ ] 杜绝"应急手改、重建丢失"的循环？
 **5.2 核心闭环逻辑：期望状态(Desired) → 调谐循环(Reconciliation) → 实际状态(Actual)**
 
+- [ ] 能讲出 edge-triggered 丢事件反例与 level-triggered 为什么免疫？
 - [ ] 所有负载纳入控制器（无裸 Pod）？
 - [ ] 用 `get -w` 亲眼观察过一次收敛（而非只看 apply 成功）？
 - [ ] 变更流程含 `kubectl diff` + `--dry-run=server` 预检？
 - [ ] 多写入方对象走 SSA，field-manager 命名规范明确？
-- [ ] HPA 管理的 replicas 已从 Git 声明中删除？
+- [ ] HPA 管理的 replicas 已从 Git 声明中删除（一个字段一个写入方）？
 **5.3 K8s机械自治核心：系统稳态自愈、资源收敛逻辑与生产容错机制**
 
+- [ ] 团队能复述保证等级表（最终收敛/无时限/不判声明对错/只管闭环内）？
 - [ ] 所有负载三探针齐全（liveness/readiness/startup）？
 - [ ] 关键服务 PDB 保底（minAvailable/maxUnavailable 明确）？
 - [ ] 优雅终止（preStop + grace period）已配？
 - [ ] 自愈三连实验至少跑过一轮并有实测耗时记录？
-- [ ] 团队对自愈边界表有共识（配置错误不自愈，走第 11 章回滚）？
 - [ ] 闭环本身纳入观测（重启次数/NotReady/调谐延迟）？
 **5.4 CRD+Operator扩展思想与企业定制化运维落地范式**
 
-- [ ] 选型按"云托管 → 成熟 Operator → 自研"优先级执行？
+- [ ] 选型按"云托管 → 成熟 Operator → 自研"优先级执行（变量表过一遍）？
 - [ ] CRD schema 含 spec/status 分离（status 子资源开启）？
 - [ ] 调谐代码幂等且 level-triggered（重放安全）？
+- [ ] status 写回冲突走"报错重试"而非覆盖？
 - [ ] CRD 由 kubebuilder 生成而非手写，版本化演进？
 - [ ] 领域资源进 Git + GitOps，Operator 自身有观测与值班归属？
 **5.5 增强工作负载：原地升级、Pod打散、Sidecar无感注入生产实践**
@@ -221,6 +225,7 @@
 - [ ] 就绪是否用 readiness 探针控制流量接入？
 - [ ] 终止是否配 preStop + 按负载差异化的 grace period（AI/有状态加长）？
 - [ ] evictionHard 三项与镜像 GC 85/80 已显式化进 kubelet 基线（非默认隐形）？
+- [ ] 能复述镜像 GC 与驱逐的"承诺/不承诺"（越过 High 最终清到 Low、越线必逐，但不保时点、不保镜像、不按业务优先级）？
 - [ ] 是否遵循最小权限隔离（非 root/最小 capabilities/禁 hostPath）？
 **6.4 运行时高频故障：启动异常、镜像损坏、资源卡死、挂载异常闭环排查**
 
@@ -254,6 +259,7 @@
 - [ ] GPU/专用节点池的污点 + 标签在节点池定义里（Git 管控），通用负载避开专用池？
 - [ ] PDB 覆盖所有多副本服务（节点池自动升级 drain 有护栏）？
 - [ ] 调度约束进业务 chart 模板，Pending 排障走 4.3 Events 判定表？
+- [ ] 关键服务已配 PriorityClass（抢占代价由低优先级负载承担）？
 **7.4 资源配额、层级限制、多租户基础隔离规范**
 
 - [ ] 每个 namespace 配 ResourceQuota（requests/limits/pods/storage 全量字段）？
@@ -268,6 +274,7 @@
 - [ ] minReplicas ≥ AZ 数 × 2、maxReplicas ≤ 团队配额，且监控 ScalingLimited？
 - [ ] 出现"CPU 正常但排队"先诊断信号错配，而非死调参？
 - [ ] 不适配负载已列入 16.3（KEDA）迁移清单？
+- [ ] 团队对 HPA 保证等级表有共识（只对代理指标负责、不承诺突发瞬时响应与缩容不抖动）？
 
 ## 第8章 Kubernetes网络、存储与服务治理
 
@@ -277,6 +284,7 @@
 - [ ] Terway NetworkPolicy 已开启且默认拒绝策略上线（附录 A.2）？
 - [ ] vSwitch 网段按 Pod 总量规划、剩余 <20% 有告警，分层定位命令团队会用？
 - [ ] Terway 升级有节点池级灰度预案？
+- [ ] 高 QPS 服务做过 DNS 调优（ndots/直连上游/NodeLocal DNSCache）？
 **8.2 Service四层、Ingress七层网关流量管控、路由治理与生产最佳实践**
 
 - [ ] 公网入口只经 ALB/NLB，且删除保护为 on？
@@ -300,70 +308,126 @@
 
 ## 第9章 一切即代码：声明式治理全域架构
 
-**9.1 现代生产运维核心痛点：配置离散、变更失控、环境不一致**
+**9.1 配置为什么一定会散：多修改入口、多事实来源与 Drift 的必然性**
 
-- [ ] 五个声明域是否都有唯一真相源（无手工管理域）？
+- [ ] 是否理解 Drift 是多入口的结构性必然（而非纪律问题）？
+- [ ] 每个资源域是否都有唯一声明源与唯一变更入口？
 - [ ] 游离 Deployment 体检是否清零？
 - [ ] 生产集群是否 100% 在 Terraform state 内？
-- [ ] 环境差异是否 = values / tfvars 差异文件？
-- [ ] 是否禁止手改 ConfigMap 与控制台手改云资源？
-**9.2 一切即代码核心价值：以声明式统一基础设施、配置、策略、观测、交付标准**
+- [ ] 手工入口是否已收敛（控制台只读、kubectl 白名单）？
+**9.2 声明式的本质：期望状态、实际状态与调谐闭环**
 
-- [ ] 云资源是否只用 Terraform 建（控制台只读）？
-- [ ] 是否守住"集群之下 Terraform、集群之上 GitOps"的边界（无越界工具）？
-- [ ] 两层真相源仓库（infra / chart-root）是否各自唯一？
-- [ ] 策略/观测/告警/发布是否全部声明式入 Git？
-- [ ] Terraform state 是否远端 + 版本化（OSS/S3）？
-**9.3 声明式架构对变更可控、环境一致、故障可追溯的生产赋能**
+- [ ] 团队能说清命令式与声明的本质区别（动作 vs 状态）？
+- [ ] 能画出 Desired→Diff→Reconcile 闭环并指出 K8s 里谁在做？
+- [ ] 理解 level-triggered 是可复现性的原理根源？
+- [ ] 能区分常驻调谐（K8s）与分次编排（Terraform）及其适配对象？
+- [ ] 引入任何管控工具时都会先问三问（Desired/谁调谐/怎么检测 Drift）？
+**9.3 Git 为什么能成为真相源：版本、评审、Diff、回滚与因果链**
 
-- [ ] 集群/节点池/VSwitch 是否全部 Terraform 声明（无控制台手建）？
-- [ ] state 是否远端 OSS/S3 + 版本化 + 加密？
+- [ ] 团队理解 Git 真相源是六能力合体（而非"存配置的地方"）？
+- [ ] 生产变更是否单一路径（MR → 同步/apply）？
+- [ ] 评审是否按层分级（values 轻量 / Terraform plan 必读）？
+- [ ] 故障排查是否先跑 Git 三连（log/diff/revert）？
+- [ ] 应急白名单外无任何绕过 Git 的变更、白名单内 2h 回写？
+**9.4 Terraform 与集群之下的世界：State 三方模型、Plan 的本质与生命周期边界**
+
+- [ ] 理解 Plan = Configuration + State + Provider Read → Diff 的三方模型？
+- [ ] 能推导丢 State 为什么导致"试图重建一切"？
+- [ ] State 是否远端 OSS/S3 + 版本化 + 加密，且做过找回演练？
 - [ ] 存量集群是否已 import 收编（plan 无大 diff）？
 - [ ] Terraform 变更是否执行 plan 必读 + destroy 双人评审？
-- [ ] 故障定位是否先对照 Git 提交时间线？
-**9.4 Helm标准化打包、多环境隔离、版本管控的最小可行生产规范**
+- [ ] 是否守住"云 API 归 Terraform、清单归 Helm"边界（无一把梭）？
+**9.5 Helm 与集群之上的标准化：Base / Environment / Service 三层覆盖模型**
 
-- [ ] 三仓库（基础 chart / 业务 chart / chart-root）职责是否清晰、写权限是否收口？
-- [ ] values 是否三层分层（base 默认 → 环境 overlay → 业务覆写）？
+- [ ] 理解最终配置 = Base + Environment Overlay + Service Override 的覆盖代数？
+- [ ] 三仓库职责与写权限是否收口（平台写 Base、业务只写 values）？
+- [ ] 环境差异是否全部显式化为 overlay（未写项 = 继承默认）？
 - [ ] version / appVersion 语义是否被正确使用（换镜像也升 chart 版本）？
 - [ ] 同一 chart 版本是否不可变（无覆盖推送）？
 - [ ] 校验三连（lint/template/diff）是否 CI 卡点化？
-- [ ] 业务接入是否只需 ≤10 行 values + 一个 MR？
+**9.6 全域统一：双层 Drift 检测、调谐分工与"一切即代码"的完整定义**
+
+- [ ] 团队能对照知识地图说清：Desired 在哪、两层各谁调谐、Drift 谁检测？
+- [ ] `terraform plan -detailed-exitcode` 周任务是否常开（exit=2 告警）？
+- [ ] ArgoCD 常驻对账 + OutOfSync 告警是否接通 13.1？
+- [ ] 两个真相源仓库（infra-repo / chart-root）结构是否就位？
+- [ ] 新增管控对象是否都按覆盖域总表归域（无第六种管法）？
+- [ ] 团队是否接受并会复述本章的"一切即代码"完整定义？
 
 ## 第10章 ArgoCD声明式GitOps生产交付体系
 
-**10.1 传统CI/CD交付痛点与GitOps核心解决方案**
+**10.1 为什么传统 Push CD 无法保证状态一致性**
 
+- [ ] 理解 K8s 本身已是 Desired State 系统、GitOps 加的是"外层控制器"？
+- [ ] 能说出 Push 丢掉的三样东西（凭据安全/持续调谐/真相源）？
 - [ ] CI 是否只推制品（ACR/ECR）+ 改 chart-root 字段（零 kubeconfig）？
 - [ ] 是否持续对账（默认 3 分钟）、偏离自动纠正、状态随时可查？
-- [ ] 是否摆脱了 push 模式（脚本化部署已下线）？
-**10.2 GitOps四大核心特性：唯一可信源、可追溯、可复现、可灰度回滚**
+**10.2 GitOps核心原理：Desired State、Live State、Diff 与 Reconciliation**
 
-- [ ] Git 唯一可信源 + 持续同步 + 变更全走 MR（可追溯）？
-- [ ] chart targetRevision + 镜像 tag 双锁、禁 latest（可复现）？
+- [ ] 能说清 OutOfSync 是 Desired Manifest vs Live Manifest 的字段级 Diff？
+- [ ] 理解 Live 会做归一化（剥离系统默认字段）？
+- [ ] 知道对账周期（默认 3m，可调）与 --refresh 的区别？
+- [ ] automated / selfHeal / prune 三个开关的语义与适用边界清楚？
+- [ ] 排查从 diff 开始，而不是见黄灯就 sync？
+**10.3 ArgoCD如何工作：Fetch → Render → Diff → Sync → Health 与两层控制器**
+
+- [ ] 能复述 Helm/ArgoCD/K8s 三系统分工？
+- [ ] 能按序说出 Fetch→Render→Diff→Sync→Health 五段？
+- [ ] 理解 K8s 不认识 chart、Render 是必须环节？
+- [ ] 知道 ArgoCD 不运行应用（两层控制器各管各的）？
+- [ ] 本地 helm template 复现 Render 是否进 CI 校验？
+**10.4 Git、Chart、Values、Image：四类制品到底谁负责什么**
+
+- [ ] 能说清四类制品各自负责什么（How/Config/Desired/Artifact）？
+- [ ] 三仓库按生命周期拆分，权限与审计边界对齐？
+- [ ] Application 多源引用 + targetRevision 锁版本为标准形态？
+- [ ] CI 日常发布只改 values 的 tag 字段？
+- [ ] 没有把业务 chart 复制进 chart-root（反例已知）？
+**10.5 Drift分型与Ownership Boundary：为什么Desired ≠ Live不一定是故障**
+
+- [ ] 团队能对任意 OutOfSync 做六类分型再处置？
+- [ ] HPA 副本与 ESO Secret 已让渡（ignoreDifferences）且登记 owner？
+- [ ] 每个 ignoreDifferences 条目能回答"这个字段归谁"？
+- [ ] 死循环按所有权冲突处理（不硬压 sync）？
+- [ ] 新控制器接入必答"它改哪些字段、Git 让渡了吗"？
+**10.6 可复现交付：Release Identity、Immutable Artifact、回滚与晋升**
+
+- [ ] 能写出 Release Identity 五元组（Git SHA/Chart/镜像/Values/集群）？
+- [ ] 理解 latest → 构建 tag → digest 三级不可变阶梯？
+- [ ] chart targetRevision + 镜像 tag 双锁、关键服务 digest 引用？
+- [ ] ACR 不可变 tag + 保留 ≥50，回滚零重建？
 - [ ] 回滚双通道可用，目标 dev <2 分钟、prod ≤5 分钟？
-- [ ] ACR tag 保留策略 ≥50，回滚零重建？
-**10.3 ArgoCD核心架构、资源同步机制、生产高可用部署方案**
+**10.7 ArgoCD高可用架构：组件职责、扩缩与渲染瓶颈**
 
-- [ ] ArgoCD HA（四组件 ≥2 + Redis HA），chart 版本锁定、对账周期调优？
-- [ ] Application 多源分层（chart-root values + 业务 chart，targetRevision 锁版本）？
-- [ ] 同步策略分级：dev/staging automated、生产手动 + `diff --exit-code` 门禁？
+- [ ] 能画出组件职责图并说出每个组件的存在理由？
+- [ ] 理解 Redis 是缓存而非事实来源？
+- [ ] 理解渲染瓶颈推导链（Applications × 周期 → repo-server → 对账延迟）？
+- [ ] ArgoCD HA（四组件 ≥2 + Redis HA），chart 版本锁定？
+- [ ] Application >100 时 repo-server 容量有预估与巡检？
 - [ ] 私有 Git 凭据只读最小权限（HTTPS PAT 或 SSH knownHosts）？
-- [ ] 镜像拉取走 ACR 免密（清单零 imagePullSecrets）？
-**10.4 多环境分支策略、变更审批、权限管控企业规范**
+**10.8 企业GitOps治理模型：Git、ArgoCD、Kubernetes三层权限与晋升治理**
 
+- [ ] 理解三层权限模型（Git=改 Desired / ArgoCD=触发同步 / K8s=操作 Actual）？
 - [ ] 环境目录隔离，晋升走目录间 MR + PR 三字段强制？
 - [ ] CODEOWNERS 生产双审批（@platform-team @sre-oncall）生效？
-- [ ] RBAC 分级（业务只读、平台 admin）+ SSO 组映射？
+- [ ] RBAC 分级（业务只读、平台 admin）+ SSO 组映射 + K8s 只读收敛？
 - [ ] 新服务 = 提交目录即接入（ApplicationSet），≤10 分钟？
 - [ ] 同步失败通知（钉钉/飞书）已接值班群？
-**10.5 GitOps+Helm流水线落地、同步异常排查与生产风险规避**
+**10.9 生产故障诊断：ArgoCD状态模型与Reconciliation排障**
 
+- [ ] 排障按状态机走（Sync/Health 两维 → Render vs Drift → 六类分型）？
 - [ ] 排查序列（get/diff/--hard-refresh/--dry-run）团队熟知？
-- [ ] OutOfSync 先判原因（手动改/helm 漂移/合法改写/secret）再处置？
-- [ ] ignoreDifferences 覆盖 HPA 副本与 ESO Secret？
 - [ ] 健康判定表可用（Progressing >10 分钟升级）、CRD 时序用 sync-wave？
+- [ ] 镜像拉取失败的两问（ACR tag 存在？免密正常？）进值班手册？
 - [ ] rollback 前停 auto-sync、2h 回写 Git（与 13.3 一致）？
+- [ ] secret 零进 Git（ESO/KMS）？
+**10.10 最终架构与生产SOP：从Git Desired State到集群Runtime**
+
+- [ ] 能沿总图讲清一次发布的完整旅程（含观测回路）？
+- [ ] 三张 SOP（发布/晋升/应急）时限明确且团队熟知？
+- [ ] 理解第三篇知识链（定义 Desired → 持续收敛 → 安全迁移）？
+- [ ] 能用八步推导链（Desired→State Store→Controller→Diff→Reconcile→Ownership→Immutable Release→Promotion）评估新交付工具？
+- [ ] 总图随架构演进季度更新？
 
 ## 第11章 灰度发布与生产变更风险治理
 
@@ -387,12 +451,14 @@
 - [ ] 人工四动作命令表是否进值班手册？
 - [ ] 熔断阈值是否基于历史基线（防误退）？
 - [ ] 预算耗尽时是否冻结新灰度（与 13.2 四档联动）？
+- [ ] 团队对保证等级表有共识（检出时延上限 = interval×failureLimit；规则外异常形态与"零影响发布"不在承诺内）？
 **11.4 生产变更全流程管控：评审、灰度、观测、复盘标准化规范**
 
 - [ ] 变更 MR 是否强制评审（含回退方案/观测项/影响面），L1 核心变更双审批、观测窗 10m/10m/15m？
 - [ ] 发布前五门槛脚本是否进 CI（探针/PDB/双 Service/观测/预算）？
 - [ ] 发布窗口是否避开节点池维护窗与业务高峰？
 - [ ] 事故复盘是否复用 13.3 模板 + 整改闭环跟踪？
+- [ ] 含 DB 变更的 MR 已标注不可逆边界（expand-contract 分步、每步可回滚）？
 **11.5 极简流量治理落地：仅选用一种主流流量实现做单案例通透演示，不罗列、不对比多网关/Service Mesh体系，聚焦「灰度观测-判断-回滚」核心链路**
 
 - [ ] 是否选定一种主流流量实现（NGINX Ingress）+ Rollouts 集成？
@@ -420,6 +486,7 @@
 - [ ] 四层来源全接入（node_exporter/cAdvisor/kube-state-metrics/业务；GPU 待 17 章）？
 - [ ] 每服务黄金信号四类齐（延迟/流量/错误/饱和度）、标签跨服务一致、容量按公式估算留 30% 余量？
 - [ ] 无 user_id 等高基数 label 且活跃序列在红线内（单指标 ≤1 万、全局 ≤300–500 万，巡检周执行）？
+- [ ] 延迟类 SLI 与告警用 p99（调用方视角）而非均值，跨实例聚合分位数在原始直方图上重算？
 **12.4 全链路日志采集、检索、脱敏与故障快速定位方案**
 
 - [ ] 日志统一采集进 Loki（Pod 销毁不丢）？
@@ -452,6 +519,7 @@
 - [ ] burn-rate 双窗口告警（14.4× P0 / 6× P2）已上线？
 - [ ] 预算四档策略接入发布流程（耗尽自动冻结 + 双签解冻）？
 - [ ] 预算剩余看板可用且 <25% 变红？
+- [ ] 低流量服务做过 SLO 置信度评估（更长窗口或聚合多服务 SLO）？
 **13.3 生产故障全流程：发现、定位、止损、恢复、复盘迭代标准化流程**
 
 - [ ] P0–P3 分级矩阵唯一且与告警 severity 对齐？
@@ -499,6 +567,7 @@
 - [ ] team/env/cost-center 三标签 + namespace 映射，分账月报与业务对齐？
 - [ ] 无状态/批处理节点已切 Spot 且配齐污点容忍 + 短排水 + 事件监听？
 - [ ] 明确 FinOps 平台归 V2（V1.0 用极简模型）？
+- [ ] requests 校准有 VPA/资源画像建议值来源（只推荐不 apply）？
 **14.4 生产故障复盘体系：根因定位、整改落地、长效治理机制**
 
 - [ ] 月度三指标看板在出（MTTR P50/P90、根因分布、闭环率，台账自动取数）？
@@ -571,6 +640,7 @@
 - [ ] 处置后是否校验 SLO 恢复（未恢复 10 min 升级人工）？
 - [ ] 月度是否出闭环三数字（占比/误处置率/人工升级率）？
 - [ ] 复盘根因是否反哺自治规则？
+- [ ] 能复述 L2 自动处置保证等级表（承诺：白名单动作/执行可审计/护栏内幂等；不承诺：处置正确性/复杂故障覆盖/无上限资源消耗）？
 
 ## 第17章 AI负载与异构算力生产运维
 

@@ -54,8 +54,8 @@
 | 6 运行时 | ACK 节点 containerd 预配、EKS Bottlerocket 对照 | crictl 排障全家桶（ps/info/stats/images）、镜像 GC/驱逐参数（kubelet 真实配置段）、GPU 容器 runtime 挂载验证 | ✅ |
 | 7 调度资源 | ECS 规格与 requests 对应、节点池标签/污点 | requests/limits+QoS 影响表、PDB/拓扑打散完整 YAML、HPA 完整 YAML（含 behavior 稳定窗口） | ✅ |
 | 8 网络存储 | Terway、SLB/ALB、云盘/NAS/OSS CSI | Terway 模式对比+TerwayConfig、Service→SLB annotation 全表、三种 StorageClass YAML（云盘 ESSD/NAS/OSS 只读挂模型）、VolumeSnapshot 备份恢复、RPO/RTO 落到云能力 | ✅ 高优先 |
-| 9 IaC | "集群之下 Terraform、集群之上 GitOps" 边界 | terraform alicloud cs_kubernetes / aws eks module 集群声明示例、Helm chart 三仓库结构树 | ✅ |
-| 10 GitOps | ArgoCD on ACK | 完整 Application YAML（多环境 values 分层）、App-of-Apps、selfHeal/prune 风险参数、接钉钉通知、应急 rollback 与 Git 真相源冲突处理 | ✅ |
+| 9 IaC | "集群之下 Terraform、集群之上 GitOps" 边界 | V1.2 知识重构：Drift 因果链/声明式本质/Git 六能力/State 三方模型/生命周期边界反例/三层覆盖代数/全域知识地图 + Terraform main.tf、OSS backend、chart 三仓库目录树、values 三层 | ✅ |
+| 10 GitOps | ArgoCD on ACK | V1.2 知识重构：Push 三重缺陷推导/OutOfSync 计算原理/五段流水线与两层 Controller/四类制品职责/Drift 六类分型+Ownership Boundary/Release Identity 五元组与三级不可变阶梯/渲染瓶颈推导链/三层权限模型/诊断状态机 + 原 Application/AppSet/RBAC 制品全保留 | ✅ |
 | 11 灰度 | ALB/SLB 流量权重 | Rollouts 完整 YAML（steps+setWeight+AnalysisTemplate 查询真实写法）、自动回滚触发条件 | ✅ |
 | 12 可观测 | 托管（ARMS/CloudWatch/AMP）vs 自建决策表 | OTel Collector 完整 config（采集→VM/Loki/Tempo）、kube-prometheus-stack 关键 values、Grafana 数据源 provisioning、Exemplar 打通配置 | ✅ 高优先 |
 | 13 SLO 应急 | 告警通道（电话/IM）、云工单升级链路 | Alertmanager 完整路由（分组/抑制/静默）、burn-rate 多窗口告警规则（真实 PromQL）、错误预算四档策略表、P0–P3 分级矩阵+升级链路、应急 SOP 卡片（含 GitOps 应急白名单）、混沌注入脚本+记录表 | ✅ 样板 |
@@ -87,3 +87,33 @@
 | 附录 A | 0/130 | 16/297 | 附录 B | 0/76 | 10/240 |
 
 > 验收口径：每章代码块 ≥3、每小节三件套齐全、云锚点服务名出现、叙事段占比 ≤40%——各章 agent 已逐节自检通过。
+
+---
+
+## 六、DDIA 写作六法 · 逐章应用表（V1.3）
+
+> 六法定义见 CONVENTIONS 第十一节（反例构造 / 权衡答"取决于什么" / 保证等级声明 / 数字体感 / 贯穿案例宇宙 / 章末知识收拢）。第 5 章已按六法重写为示范章。其余章节按下表"就地增量"——不改结构（除已豁免的 9/10 章），把六法注入现有 10 步模板的对应步骤。
+
+| 章 | 反例构造（注入"架构约束与权衡"或"生产问题"） | 保证等级声明 | 优先级 |
+|---|---|---|---|
+| 1 | 三代范式各构造一个"人肉/脚本时代才会发生的静默失败" | — | 低（立论章） |
+| 2 | 可变镜像的"同 tag 不同内容"事故链 | 镜像 tag ≠ 版本身份的保证边界 | 中 |
+| 3 | 一刀切负载模型的失败场景（已有雏形） | — | 低 |
+| 4 | 控制台手建集群后"无法 import 的漂移黑洞" | 托管 SLA 承诺/不承诺（控制面 ≠ 节点面） | 中 |
+| 5 | ✅ 已完成：断网的 scale 命令 / 丢事件的事件驱动控制器 / 双人并发 apply | ✅ 调谐闭环保证等级表 | ✅ 示范章 |
+| 6 | "删了容器磁盘没降"（已有，可升格为猜谜式） | GC 的回收保证（引用计数归零才删） | 中 |
+| 7 | HPA CPU 信号的"代理失效"场景强化为思想实验 | HPA 承诺（缩放不承诺延迟改善） | 高 |
+| 8 | WaitForFirstConsumer 之前建卷的拓扑死锁 | 云盘承诺（同 AZ 绑定/NAS 一致性模型） | 中 |
+| 9 | ✅ 已含：Terraform 一把梭三状态污染 | ✅ State 三方模型即保证边界 | ✅ 完成 |
+| 10 | ✅ 已含：全塞 chart-root / 双窗口误报 | ✅ OutOfSync 计算模型即契约 | ✅ 完成 |
+| 11 | 构造"无 AnalysisTemplate 的灰度靠人盯 40 分钟"场景 | 灰度承诺（异常检出时延/回滚触发条件） | 高 |
+| 12 | 构造"平均延迟正常、p99 已爆炸"的排队场景（DDIA 经典） | 采样承诺（概率性 vs 全量） | 高 |
+| 13 | ✅ 已含：单窗口误报（可升格为思想实验） | SLO 的统计置信（窗口/样本量） | 高 |
+| 14 | Spot"省了 60% 但一次回收赔光"算例 | Spot 承诺（提前通知 ≠ 保证） | 中 |
+| 15 | "没有黄金路径时的第 41 人周"（已有数字，可造场景） | 平台默认值承诺（安全默认不可关） | 低 |
+| 16 | 构造"无护栏的自动扩缩把节点费打爆" | L2 自动处置白名单的承诺边界 | 高 |
+| 17 | 构造"模型进镜像后每次发布重拉 65GB" | cGPU 隔离承诺（显存隔离 ≠ 算力隔离） | 中 |
+| 18 | ✅ 已含：max-num-seqs 默认 256 的雪崩 | TTFT/TPOT 的百分位承诺 | 高 |
+| 附录 A/B | — | — | 低 |
+
+> **执行状态（2026-08-14 全部完成）**：15 个正文章 + 2 个附录按六法增量注入完毕（结构零变动、每章净增 4–35 行）；16/16 章有思想实验、14 个应有章节有保证等级表、5/16/18 三个理论核心章带章末知识收拢；CHECKLIST 已同步 8 条新清单项。第 5 章为全量示范章，第 9/10 章在知识重构时已天然达标。
