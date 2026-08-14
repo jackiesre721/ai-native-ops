@@ -254,8 +254,8 @@ Helm 标准化范式：
 
 | 维度 | 规范 | 权衡 |
 |---|---|---|
-| **基础 chart** | 沉淀探针/资源/网络/监控等公共最佳实践 | 前期沉淀成本 |
-| **业务 chart 继承** | 业务 chart 继承基础 chart，只填 values | 减少重复，强制一致 |
+| **基础 chart**（仓库 base-chart） | 沉淀探针/资源/网络/监控等公共最佳实践 | 前期沉淀成本 |
+| **业务 chart**（仓库 service-chart）继承 | 业务 chart 继承基础 chart，只填 values | 减少重复，强制一致 |
 | **多环境 values** | 每环境一份 values，同 chart 不同值 | 环境隔离显式 |
 | **chart 版本** | chart + values 都版本化 | 可追溯可回滚 |
 

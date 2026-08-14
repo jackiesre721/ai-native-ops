@@ -68,7 +68,7 @@ flowchart TB
     class APP,SVC,BASE,CL proc
 ```
 
-- **真相源链路（三仓库分工）**：**chart-root**（版本控制）生成 ArgoCD Application → Application 的 `repoUrl` 指向 **service-chart**（业务 chart）→ service-chart 通过 Helm `dependencies` 引用 **base-chart**（公共模板：探针/资源/网络/监控，9.4）→ ArgoCD 渲染 base + service + values → 同步集群。chart-root 管版本、service-chart 管业务形态、base-chart 管公共最佳实践——三者分工，不是堆在一个仓库。
+- **真相源链路（三仓库分工）**：**chart-root**（编排仓库，版本控制）生成 ArgoCD Application → Application 的 `repoUrl` 指向 **业务 chart**（service-chart 仓库）→ 业务 chart 通过 Helm `dependencies` 引用 **基础 chart**（base-chart 仓库，公共模板：探针/资源/网络/监控，9.4）→ ArgoCD 渲染 基础 chart + 业务 chart + values → 同步集群。chart-root 管版本、业务 chart 管形态、基础 chart 管公共最佳实践——三者分工，不是堆在一个仓库。
 - controller：ArgoCD 部署在集群内，配 Git 只读凭据。
 - CI 边界：CI 只负责构建镜像 + 推仓库 + 改 chart-root 的镜像 tag 字段（不部署）。
 - 同步：ArgoCD 检测 Git 变化 → 同步到集群 → 持续校验一致性。
