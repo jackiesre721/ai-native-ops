@@ -1,9 +1,9 @@
 # 第5章 声明式API与控制循环核心机制
 <!-- 第二篇 Kubernetes 底座 ｜ ★理论核心·机械自治（全书第一层理论核心·DDIA 写作法示范章） ｜ 状态：终审中 -->
 
-> 本章定位：全书三层自治模型**第一层 · 机械自治**。讲清 K8s 声明式调谐闭环（期望状态 → 调谐循环 → 实际状态），实现基础设施层稳态自愈。本章是全书理论支点之一，后续运维自治（第 16 章）与智能自治（第 18 章）都建立在此基础之上。本章全部实验与制品跑在托管 K8s 上（阿里云 ACK 主参考、AWS EKS 对照）——控制面这套"声明式 API + 调谐循环"本身就是云厂商的托管服务（4.2）。贯穿案例：墨丘里商城的订单服务 demo-api（CONVENTIONS 七）。
+> 本章定位：全书三层自治模型**第一层 · 机械自治**。讲清 K8s 声明式调谐闭环（期望状态 → 调谐循环 → 实际状态），实现基础设施层稳态自愈。本章是全书理论支点之一，后续运维自治（第 16 章）与智能自治（16.4⑤/16.5 Agent 引擎）都建立在此基础之上。本章全部实验与制品跑在托管 K8s 上（阿里云 ACK 主参考、AWS EKS 对照）——控制面这套"声明式 API + 调谐循环"本身就是云厂商的托管服务（4.2）。贯穿案例：墨丘里商城的订单服务 demo-api（CONVENTIONS 七）。 **主旨绑定（V1.4）**：L3 智能自治的控制论原型——运维 Agent 的"目标 → 执行 → 校验"闭环（16.4⑤/16.5）就是放大版的调谐循环，三层自治由此起步。 **承上启下**：承第 4 章底座；启第 7 章资源与调度治理（调谐闭环的期望状态靠资源模型兑现），同一思维随后延伸到第 9/10 章交付层。
 
-> **边界声明**：本章只讲声明式机制与机械自治闭环；业务层观测自治归第 16 章，AI 智能自治归第 18 章。超出部分归 V2。
+> **边界声明**：本章只讲声明式机制与机械自治闭环；业务层观测自治归第 16 章，智能自治（L3）承载于 16.4⑤/16.5。超出部分归 V2。
 
 ---
 
@@ -102,7 +102,7 @@ git add demo-api.yaml && git commit -m "api: replicas 3->5"
 
 ### 自动化/自治闭环
 
-声明式思维是 L1 机械自治的认知前提：**只有先接受"声明期望、让系统调谐"，5.2 的闭环与 5.3 的自愈才有用武之地**。本节心智转换是本章地基，也是 L2（16 章）/L3（18 章）把"决策"交给系统执行的第一步。
+声明式思维是 L1 机械自治的认知前提：**只有先接受"声明期望、让系统调谐"，5.2 的闭环与 5.3 的自愈才有用武之地**。本节心智转换是本章地基，也是 L2（16 章）/L3（16.4⑤/16.5）把"决策"交给系统执行的第一步。
 
 ### 生产检查清单
 
@@ -159,7 +159,7 @@ flowchart LR
 |---|---|---|
 | 负载模式 | 稳定可预测（内部工具） | 突发/周期性强（面向用户） |
 | 信号质量 | 无可靠业务信号 | 有（CPU 代表性强 / 队列深度可取，7.5） |
-| 副本代价 | 低（秒级拉起） | 高（GPU 推理分钟级加载 → 17.4 预热权衡） |
+| 副本代价 | 低（秒级拉起） | 高（有状态服务重建代价高 → 预热权衡） |
 
 结论永远是"取决于"：**核心原则只有一条——一个字段只能有一个写入方**（所有权，10.5 的 Ownership Boundary）。HPA 接管了 replicas，Git 就必须删掉这个字段，否则两个写入方打架（5.2 ③ 的 SSA 冲突就是它的技术形态）。
 
@@ -250,7 +250,7 @@ kubectl apply --server-side --force-conflicts -f demo-api.yaml   # 日常禁用�
 
 ### 自动化/自治闭环
 
-本节定义的调谐闭环就是 L1 机械自治的核心引擎：**期望状态 → 调谐循环 → 实际状态收敛**。level-triggered 语义让闭环对自身故障免疫——这是"机械自治"敢叫自治的资格证明。L2（16 章）与 L3（18 章）的一切决策，最终都翻译成"改期望状态"交给这个闭环执行——闭环不可信，上层自治就是空中楼阁。
+本节定义的调谐闭环就是 L1 机械自治的核心引擎：**期望状态 → 调谐循环 → 实际状态收敛**。level-triggered 语义让闭环对自身故障免疫——这是"机械自治"敢叫自治的资格证明。L2（16 章）与 L3（16.4⑤/16.5）的一切决策，最终都翻译成"改期望状态"交给这个闭环执行——闭环不可信，上层自治就是空中楼阁。
 
 ### 生产检查清单
 
@@ -297,7 +297,7 @@ kubectl apply --server-side --force-conflicts -f demo-api.yaml   # 日常禁用�
 |---|---|---|
 | **健康探针** | 判定 Pod 健康，触发自愈 | 配置不当会误杀（7.1） |
 | **PDB** | 自愿中断时保最少可用副本 | 与滚动更新/驱逐协调 |
-| **优雅终止** | preStop + grace period 处理在途请求 | AI 负载要给足清理时间（17/18 章） |
+| **优雅终止** | preStop + grace period 处理在途请求 | 长连接/有状态服务要给足清理时间 |
 | **最终一致容忍** | 收敛期短暂偏离需观测与 SLO 兜底（13 章） | 不是所有调用方都容忍短暂少副本 |
 
 权衡的核心：**机械自治用"最终一致 + 持续调谐"换稳态自愈，容错机制让自愈动作本身不制造二次故障**；而声明的正确性永远在闭环之外，由人来守（评审）与兜（回滚）。
@@ -552,7 +552,7 @@ func (r *ScheduledBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 ### 自动化/自治闭环
 
-CRD + Operator 是 L1 机械自治的**扩展机制**：原生资源不够用时，用自定义资源 + 自定义控制器把新的"期望→调谐→实际"闭环纳入系统，让机械自治覆盖任意领域逻辑（含 AI 负载生命周期，17/18 章）。它同时为 L2/L3 提供更丰富的治理载体——上层决策可以落成"改某个 CR 的 spec"，交回闭环执行。
+CRD + Operator 是 L1 机械自治的**扩展机制**：原生资源不够用时，用自定义资源 + 自定义控制器把新的"期望→调谐→实际"闭环纳入系统，让机械自治覆盖任意领域逻辑（治理件同理——分诊器的规则与白名单即可 CR 化声明）。它同时为 L2/L3 提供更丰富的治理载体——上层决策可以落成"改某个 CR 的 spec"，交回闭环执行。
 
 ### 生产检查清单
 
@@ -569,11 +569,11 @@ CRD + Operator 是 L1 机械自治的**扩展机制**：原生资源不够用时
 
 ### 生产问题
 
-AI 推理（大镜像、模型加载慢）、有状态服务（重启代价高）、多副本需严格打散（避免单节点/单可用区扎堆）——原生工作负载为通用场景设计，处理这些场景吃力：滚动更新=重建 Pod，大镜像重新加载分钟级；副本可能扎堆单点。特殊负载需要增强能力。
+大镜像服务（如内嵌重型依赖的报表引擎、单体应用——镜像数 GB、冷启分钟级）、有状态服务（重启代价高）、多副本需严格打散（避免单节点/单可用区扎堆）——原生工作负载为通用场景设计，处理这些场景吃力：滚动更新=重建 Pod，大镜像重新拉取加载分钟级；副本可能扎堆单点。特殊负载需要增强能力。
 
 ### 传统方案失效原因
 
-- 重建式更新代价高：大镜像 Pod 重建要重新拉镜像+加载模型（vLLM 类推理冷启分钟级）。
+- 重建式更新代价高：大镜像 Pod 重建要重新拉镜像+初始化（重型服务冷启分钟级）。
 - 原生 Deployment 无原地升级：改镜像必重建，网络/存储身份全换。
 - 打散靠手配、Sidecar 与业务容器同生共死：默认调度可能扎堆，治理组件升级连累业务。
 
@@ -587,38 +587,38 @@ AI 推理（大镜像、模型加载慢）、有状态服务（重启代价高�
 | **Pod 打散**（topologySpread） | 副本跨节点/可用区均匀分布 | 约束增多、资源碎片风险（原理详见 7.3） |
 | **原生 Sidecar** | Sidecar 独立生命周期、保证启停顺序 | 需 K8s ≥1.28；1.29 起默认可用，1.28 需开 SidecarContainers 门控（特性状态以官方文档为准） |
 
-要不要用增强能力，取决于（变量表）：负载重建代价（秒级普通服务用原生即可 / 分钟级 AI 负载必用 CloneSet）、分布风险（单 AZ 集群无需 zone 约束）、治理组件独立升级需求（无 SidecarSet 需求就不引入）。
+要不要用增强能力，取决于（变量表）：负载重建代价（秒级普通服务用原生即可 / 分钟级大镜像与长连接服务必用 CloneSet）、分布风险（单 AZ 集群无需 zone 约束）、治理组件独立升级需求（无 SidecarSet 需求就不引入）。
 
 权衡的核心：**增强能力用复杂度换场景适配，按场景选用，不全开**。
 
 ### 最小可行方案
 
-1. **大镜像/AI 推理**：CloneSet（InPlaceIfPossible）避免重建重加载（17/18 章）。
+1. **大镜像/长连接服务**：CloneSet（InPlaceIfPossible）避免重建重加载。
 2. **关键多副本**：`topologySpreadConstraints` 跨 zone/hostname 打散（7.3）。
 3. **日志/监控 Sidecar**：原生 Sidecar（init 容器 + `restartPolicy: Always`）。
 4. **有状态服务**：StatefulSet 有序滚动 + PV 保持（第 8 章）。
 
 ### 生产落地实现
 
-**① 原地升级：Kruise CloneSet 最小可运行 YAML**：
+**① 原地升级：Kruise CloneSet 最小可运行 YAML**（以长连接网关 im-gateway 为例——重建即断连，原地升级收益最大）：
 
 ```yaml
 apiVersion: apps.kruise.io/v1beta1
 kind: CloneSet
 metadata:
-  name: llm-gateway
+  name: im-gateway
   namespace: prod
 spec:
   replicas: 3
   selector:
-    matchLabels: { app: llm-gateway }
+    matchLabels: { app: im-gateway }
   template:
     metadata:
-      labels: { app: llm-gateway }
+      labels: { app: im-gateway }
     spec:
       containers:
       - name: gw
-        image: registry.cn-hangzhou.aliyuncs.com/demo/llm-gateway:v1.8.0
+        image: registry.cn-hangzhou.aliyuncs.com/demo/im-gateway:v2.4.0
         ports: [{ containerPort: 8080 }]
   updateStrategy:
     type: InPlaceIfPossible      # 可调：能原地则原地，否则退回重建
@@ -637,12 +637,12 @@ spec:
     topologyKey: topology.kubernetes.io/zone
     whenUnsatisfiable: DoNotSchedule    # 可用区级硬约束：不满足就调度失败
     labelSelector:
-      matchLabels: { app: llm-gateway }
+      matchLabels: { app: im-gateway }
   - maxSkew: 1
     topologyKey: kubernetes.io/hostname
     whenUnsatisfiable: ScheduleAnyway   # 节点级软约束：尽量打散
     labelSelector:
-      matchLabels: { app: llm-gateway }
+      matchLabels: { app: im-gateway }
 ```
 
 **③ 原生 Sidecar 注入**（日志/采集 agent 与业务解耦）：
@@ -651,7 +651,7 @@ spec:
 spec:
   containers:
   - name: gw
-    image: registry.cn-hangzhou.aliyuncs.com/demo/llm-gateway:v1.8.0
+    image: registry.cn-hangzhou.aliyuncs.com/demo/im-gateway:v2.4.0
   initContainers:
   - name: otel-agent                     # 原生 Sidecar = init 容器 + restartPolicy: Always
     image: registry.cn-hangzhou.aliyuncs.com/demo/otel-collector:0.104.0
@@ -661,13 +661,13 @@ spec:
 
 原生 Sidecar 保证：**先于主容器启动、晚于主容器终止，独立崩溃自动重启**；若需"存量 Pod 注入/独立热升级"，升级到 Kruise SidecarSet（与 CloneSet 同在 ack-kruise 组件里）。
 
-云服务映射：CloneSet/SidecarSet 来自 **OpenKruise，ACK 组件市场一键安装 ack-kruise**（EKS 对照：Helm 装 openkruise chart）；镜像分发用 ACR P2P/ECR 缓存预热。数字（带体感）：**大镜像推理更新从重建的 ≈3 分钟（拉镜像+加载模型——够用户放弃等待关掉页面）降到原地秒级（镜像已缓存时容器重启典型 5–15s——一次接口重试的时长）；maxSkew=1 保证 3 副本跨 ≥2 可用区**。
+云服务映射：CloneSet/SidecarSet 来自 **OpenKruise，ACK 组件市场一键安装 ack-kruise**（EKS 对照：Helm 装 openkruise chart）；镜像分发用 ACR P2P/ECR 缓存预热。数字（带体感）：**大镜像服务更新从重建的 ≈3 分钟（拉镜像+初始化——够用户放弃等待关掉页面）降到原地秒级（镜像已缓存时容器重启典型 5–15s——一次接口重试的时长）；maxSkew=1 保证 3 副本跨 ≥2 可用区**。
 
 ### 典型故障案例
 
-某 vLLM 推理服务每次更新重建 Pod，重新加载模型耗时 3 分钟，更新窗口容量下降。改 CloneSet 原地升级后只换镜像不重建，模型加载利用既有缓存，中断从分钟级降到秒级。
+某报表引擎服务（镜像 4 GB）每次更新重建 Pod，重新拉取与初始化耗时 3 分钟，更新窗口容量下降。改 CloneSet 原地升级后只换镜像不重建，初始化利用既有缓存，中断从分钟级降到秒级。
 
-点评：**重建式更新对大镜像/AI 负载是奢侈品**，原地升级是这类场景的生产刚需。
+点评：**重建式更新对大镜像/长连接负载是奢侈品**，原地升级是这类场景的生产刚需。
 
 ### 根因定位
 
@@ -675,17 +675,17 @@ spec:
 
 ### 长效治理方案
 
-- 大镜像/AI 负载统一 CloneSet + 镜像预热；关键服务强制打散（zone 硬约束）。
+- 大镜像/长连接负载统一 CloneSet + 镜像预热；关键服务强制打散（zone 硬约束）。
 - Sidecar 一律原生 Sidecar（或 Kruise SidecarSet），禁与业务容器混编。
 - 增强负载纳入 4.4 版本兼容矩阵（Kruise 版本跟随 K8s 版本）。
 
 ### 自动化/自治闭环
 
-增强工作负载让 L1 机械自治在特殊场景下**依然高效**：原地升级让大镜像负载的更新不破坏稳态；打散让自愈重建后的分布依然高可用；Sidecar 独立重启让治理组件故障不连累业务。它们拓宽了 L1 的适用边界，是 AI 负载（17/18 章）能高效自愈的支撑。
+增强工作负载让 L1 机械自治在特殊场景下**依然高效**：原地升级让大镜像负载的更新不破坏稳态；打散让自愈重建后的分布依然高可用；Sidecar 独立重启让治理组件故障不连累业务。它们拓宽了 L1 的适用边界，是各类特殊负载（治理件与运维 Agent 自身也在其列）能高效自愈的支撑。
 
 ### 生产检查清单
 
-- [ ] 大镜像/AI 负载用 CloneSet 原地升级（镜像预热就位）？
+- [ ] 大镜像/长连接负载用 CloneSet 原地升级（镜像预热就位）？
 - [ ] 关键服务 topologySpread（zone 硬约束 + hostname 软约束）？
 - [ ] Sidecar 用原生 Sidecar（restartPolicy: Always）或 SidecarSet？
 - [ ] 有状态服务有序滚动 + PV 保持？
@@ -695,3 +695,5 @@ spec:
 > 1. **命令式死于部分失败 × 不幂等**：分布式下动作可能断在中间、重试会重复；声明是状态而非动作，天然幂等、免疫重放——这是声明式赢的本质原因，可审计只是副产品。
 > 2. **调谐闭环的契约**：level-triggered 使其对控制器自身故障免疫（重启不错过状态）；承诺最终收敛与重放安全，**不承诺收敛时限、过程平稳、声明正确**——错误声明会被忠实而快速地扩散，质量门槛必须建在声明入口。
 > 3. **一个字段只能有一个写入方**：replicas 归 Git 还是 HPA 取决于负载模式/信号质量/副本代价；两个写入方抢字段就是抖动与静默覆盖的根源（SSA 冲突与 Ownership Boundary 是同一原理的技术形态）。
+
+> **下一章预告**：闭环机制既立，看它的原料——第 7 章讲资源与调度治理：探针、驱逐、HPA 与弹性边界，期望状态靠资源模型兑现（原生弹性短板伏笔，16.3 收口）。

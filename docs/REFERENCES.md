@@ -17,8 +17,8 @@
 
 - **Kubernetes 官方文档**：<https://kubernetes.io/docs/> — 全篇底座参考。
 - **K8s Controller / Reconcile 模式**：<https://kubernetes.io/docs/concepts/architecture/controller/> — 第 5 章"期望状态→调谐→实际状态"的官方定义（L1 机械自治的来源）。
-- **OCI Image / Runtime Spec**：<https://github.com/opencontainers> — 第 2/6 章 OCI 规范、镜像/运行时标准。
-- **containerd 文档**：<https://containerd.io/docs/> — 第 6 章 CRI 运行时。
+- **OCI Image / Runtime Spec**：<https://github.com/opencontainers> — 第 2 章 OCI 规范、镜像/运行时标准。
+- **containerd 文档**：<https://containerd.io/docs/> — CRI 运行时官方文档（原第 6 章 V1.7 瘦身，作延伸深读）。
 - **CNI Spec**：<https://www.cni.dev/> ；**CSI**：<https://kubernetes-csi.github.io/docs/> — 第 8 章网络/存储接口标准。
 - **Raft 论文《In Search of an Understandable Consensus Algorithm》**：<https://raft.github.io/raft.pdf> — 第 4 章 etcd 高可用（奇数多副本/多数派）的共识基础。
 - **K8s 调度框架**：<https://kubernetes.io/docs/concepts/scheduling-eviction/> — 第 7 章调度/亲和/污点/拓扑分布。
@@ -49,18 +49,14 @@
 - **KEDA 文档**：<https://keda.sh/docs/> — 第 16.3 节事件驱动弹性（托管 HPA、ScaledObject、scale-to-zero）的权威实现。
 - **《Accelerate》(DORA)** — 研发效能/交付频率/稳定性指标，平台工程的价值度量。
 
-## 第六篇 · AI 原生运维（第 17–18 章，全书差异化王牌）
+## 延伸深读 · 运维 Agent 与 LLM 引擎（主旨方向）
 
-- **《How to Scale Your Model》（JAX 团队 Scaling Book）**：<https://jax-ml.github.io/scaling-book/index> — **第 17/18 章核心深读**：大规模模型的数据并行 / 全分片数据并行（FSDP）/ 张量并行 / 流水线并行的原理与取舍，显存切账、混合精度、性能剖析与 checkpointing。与 18.3 显存拆账/容量模型同源；也是本书 V2"多卡张量并行与 gang 调度"方向的预读材料——Google 团队把"算力换算力效率"讲得最系统的一本。
-- **Modular《AI Engineering Handbook》**：<https://handbook.modular.com/> — **第 17/18 章核心深读**：LLM 推理生命周期、TTFT/goodput 等 SLO 指标、GPU 架构与显存、KV cache 估算、continuous batching / prefix caching、调度器可视化。与 18.2/18.3 性能与容量模型高度互补。
-- **vLLM + PagedAttention 论文《Efficient Memory Management for Large Language Model Serving with PagedAttention》**：<https://arxiv.org/abs/2309.06180> — 第 18.2 节 KV Cache / 分页内存管理的论文源头。
-- **Orca 论文《Orca: A Distributed Serving System for Transformer-Based Generative Models》(OSDI 2022)**：<https://www.usenix.org/conference/osdi22/presentation/yu> — 第 18.2 节 Continuous Batching（迭代级调度）的提出者。
-- **SGLang**：<https://github.com/sgl-project/sglang> — 第 18.1 节推理框架（结构化生成 / RadixAttention）。
-- **《Attention Is All You Need》(arXiv 1706.03762)**：<https://arxiv.org/abs/1706.03762> — KV Cache / Attention 的算法基础（本书只引用，不展开算法）。
-- **NVIDIA GPU Operator**：<https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/> — 第 17 章 GPU 设备插件 / 算力接入。
-- **MLPerf Inference**：<https://mlcommons.org/benchmarks/inference-datacenter/> — 第 18 章推理性能/吞吐的行业基准参照。
-- **阿里云 STAROps（全域智能运维平台）**：<https://help.aliyun.com/zh/starops/product-overview/> — 运维 Agent 的托管实例：自然语言诊断 / RCA / 数字员工编排，16.4 / 18.9"L3 承载形态"的商业印证。
-- **AWS DevOps Agent**：<https://aws.amazon.com/devops-agent/> — 自主 SRE Agent（2026 年 GA）：24/7 自主 triage + RCA + 处置建议（建议式而非全自主执行），18.9 的托管对照。
+- **阿里云 STAROps（全域智能运维平台）**：<https://help.aliyun.com/zh/starops/product-overview/> — 运维 Agent 的托管实例：自然语言诊断 / RCA / 数字员工编排，16.4 / 16.5"L3 承载形态"的商业印证。
+- **AWS DevOps Agent**：<https://aws.amazon.com/devops-agent/> — 自主 SRE Agent（2026 年 GA）：24/7 自主 triage + RCA + 处置建议（建议式而非全自主执行），16.4⑤/16.5 的托管对照。
+- **阿里云百炼 DashScope 文档**：<https://help.aliyun.com/zh/model-studio/> — 16.4⑤ 分诊器模型 API 的主参考（兼容协议，对照 AWS Bedrock）。
+- **OpenAI Cookbook（结构化输出与评测）**：<https://cookbook.openai.com/> — JSON mode / few-shot / 评测集设计的工程实践，16.5② 评测门禁的方法参照。
+
+> AI 训练/推理负载运维方向（GPU 调度、KV Cache、推理性能等）V1.11 判定与主旨无关，已移出本书范围，本清单不再收录。
 
 ## 附录 / 全书方法论
 

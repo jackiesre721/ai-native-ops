@@ -1,12 +1,12 @@
 # 第12章 OpenTelemetry全域可观测体系
 <!-- 第四篇 可观测与稳定性 ｜ 常规章（技术栈永久锁死） ｜ 状态：终审中 -->
 
-> 本章定位：第四篇开篇，建立全域可观测体系，是全书可观测体系的技术栈锚点——后续所有观测章节与 AI 负载可观测（第 18 章）均复用本章技术栈。全书生态为托管 K8s（阿里云 ACK 主参考、AWS EKS 对照），本栈作为自建锁死栈跑在托管集群之上；「托管可观测 vs 自建」的取舍在 12.1 用决策表一次定调。
-> **主线定位**：本章为L2 运维自治的输入——全域信号采集，风险识别的源头（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
+> 本章定位：第四篇开篇，建立全域可观测体系，是全书可观测体系的技术栈锚点——后续所有观测环节与 16.5 上下文装配器均复用本章技术栈。全书生态为托管 K8s（阿里云 ACK 主参考、AWS EKS 对照），本栈作为自建锁死栈跑在托管集群之上；「托管可观测 vs 自建」的取舍在 12.1 用决策表一次定调。
+> **主线定位**：本章为L2 运维自治的输入——全域信号采集，风险识别的源头（三层自治总览见 1.5，理论核心为第 5/16 章——L3 智能自治承载于 16.4⑤/16.5 运维 Agent 引擎）。 **主旨绑定（V1.4）**：AIOps 的信号底座——16.5 上下文装配器的四件套（告警/变更/SLO/相似工单）全部由此栈供给；没有统一可观测，L3 智能自治就是瞎子（16.5①）。 **承上启下**：承第 11 章灰度判断（观测校验的需求在此展开为全域体系——第四篇开篇）；启第 13 章告警（数据底座 → 智能告警的信号源）。
 
 > **技术栈锁死（永久不变）**：可观测栈 = VictoriaMetrics（指标）、Loki（日志）、Tempo（链路）、OpenTelemetry（采集）、Grafana（可视化）；告警链路 = vmalert + Alertmanager（与第 13 章一致）；交付 = Helm/ArgoCD。不引入 Prometheus / ELK / Jaeger 等任何替代组件。
 > **去工具化说明（原理优先）**：本章真正要讲的是**可观测的底层逻辑**——三支柱协同、trace ID 贯穿关联、低成本存储 + 统一可视化。这套逻辑与具体组件无关，换成任何等价栈同样适用；锁死 VM/Loki/Tempo 是选一个参考实例保证全书落地一致，不是判定其他栈不可用（组件对比归 V2）。
-> **边界声明**：本章只讲统一可观测栈；GPU 指标来源（DCGM）在 12.3 预埋、深度归第 17 章；AI 负载专属可观测归第 18 章；可观测平台化封装归第 16 章。**SLO/错误预算归第 13 章，本章只讲采集与协同。**
+> **边界声明**：本章只讲统一可观测栈；可观测平台化封装归第 16 章。**SLO/错误预算归第 13 章，本章只讲采集与协同。**
 
 ---
 ## 12.1 可观测三支柱协同逻辑与生产落地边界
@@ -45,7 +45,7 @@
 |---|---|---|---|
 | RED（每请求性能） | 延迟/错误率/QPS | 时间窗+维度 → Tempo TraceQL | ✓ 能（原生指标或 spanmetrics） |
 | 业务（聚合计数） | 订单数/支付额 | 时间 + RED 桥 | ✗ 不该串 |
-| 基础设施 | CPU/GPU/内存 | 时间 + RED 桥 | ✗ 不该串 |
+| 基础设施 | CPU/内存/磁盘/网络 | 时间 + RED 桥 | ✗ 不该串 |
 
 业务指标报警（出事了）→ 同时刻 RED（哪类请求）→ RED 的 exemplar 跳 trace（为什么）。**业务计数器串不上 exemplar 是对的——它该串的是"同时刻的 RED"**。
 
@@ -91,7 +91,7 @@ curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
 
 ### 自动化/自治闭环
 
-本节为 L2 运维自治（16 章）与 L3 智能自治（18 章）的"观测输入"环节：exemplar 串通的 RED 层是自治从"指标异常"跳到"具体请求 trace"定位根因的入口。
+本节为 L2 运维自治（16 章）与 L3 智能自治（16.4⑤/16.5）的"观测输入"环节：exemplar 串通的 RED 层是自治从"指标异常"跳到"具体请求 trace"定位根因的入口。
 
 ### 生产检查清单
 
@@ -190,7 +190,7 @@ grafana:
 
 ### 自动化/自治闭环
 
-统一栈是全书自治体系的**唯一信号底座**：L1 调谐观测、L2 的 SLO 决策、L3 的推理指标全部来自这套栈（16/18 章）。
+统一栈是全书自治体系的**唯一信号底座**：L1 调谐观测、L2 的 SLO 决策、L3 的推理上下文全部来自这套栈（16 章 / 16.4⑤/16.5）。
 
 ### 生产检查清单
 
@@ -230,7 +230,6 @@ grafana:
 | 节点 | node_exporter（DaemonSet） | node_cpu_seconds_total、node_memory_MemAvailable_bytes | stack 已内置 |
 | 容器/Pod | kubelet 内置 cAdvisor | container_cpu_usage_seconds_total、container_memory_working_set_bytes | vmagent 抓 kubelet 端点 |
 | K8s 对象 | kube-state-metrics | kube_pod_status_phase、kube_deployment_status_replicas | 重启/副本/探针状态的唯一权威 |
-| GPU | DCGM exporter（第 17 章） | DCGM_FI_DEV_GPU_UTIL、DCGM_FI_DEV_FB_USED | AI 负载专属，17 章展开 |
 | 业务 | OTel SDK / prom client | RED + 业务计数器 | 无指标服务由 spanmetrics 兜底（12.1） |
 
 基数治理规范（数字即红线，经验值）：
@@ -324,11 +323,11 @@ curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
 
 ### 自动化/自治闭环
 
-本节为 L2/L3 自治的"量化输入"环节：SLO（13 章）与推理自治（18 章）的决策都基于本节标准化的黄金信号；基数失控会让自治赖以决策的指标系统自身崩溃。
+本节为 L2/L3 自治的"量化输入"环节：SLO（13 章）与智能分诊（16.4⑤）的决策都基于本节标准化的黄金信号；基数失控会让自治赖以决策的指标系统自身崩溃。
 
 ### 生产检查清单
 
-- [ ] 四层来源全接入（node_exporter/cAdvisor/kube-state-metrics/业务；GPU 待 17 章）？
+- [ ] 四层来源全接入（node_exporter/cAdvisor/kube-state-metrics/业务）？
 - [ ] 每服务黄金信号四类齐（延迟/流量/错误/饱和度）、标签跨服务一致、容量按公式估算留 30% 余量？
 - [ ] 无 user_id 等高基数 label 且活跃序列在红线内（单指标 ≤1 万、全局 ≤300–500 万，巡检周执行）？
 - [ ] 延迟类 SLI 与告警用 p99（调用方视角）而非均值，跨实例聚合分位数在原始直方图上重算？
@@ -665,7 +664,7 @@ histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_
 
 ### 自动化/自治闭环
 
-本节为 L2/L3 自治"根因定位"环节的因果工具：指标告诉自治系统"有问题"，链路告诉它"问题在哪段"（16/18 章）。
+本节为 L2/L3 自治"根因定位"环节的因果工具：指标告诉自治系统"有问题"，链路告诉它"问题在哪段"（16 章 / 16.4⑤）。
 
 ### 生产检查清单
 
@@ -680,7 +679,7 @@ histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_
 flowchart LR
     subgraph SRC["信号源 · 托管集群（ACK/EKS）"]
       APP["业务应用<br/>OTel SDK 埋点"]
-      K8S["节点/容器/集群对象<br/>node_exporter·cAdvisor·kube-state-metrics·DCGM(17章)"]
+      K8S["节点/容器/集群对象<br/>node_exporter·cAdvisor·kube-state-metrics"]
     end
     subgraph COL["统一采集层"]
       VMA["vmagent<br/>pull 指标"]
@@ -712,3 +711,5 @@ flowchart LR
     class VM,LK,TP store
     class GF,VA,AM ui
 ```
+
+> **下一章预告**：信号有了，消费它——第 13 章讲告警治理、SLO 与故障应急：口径、分级、止损优先，把信号变成可执行的稳定性纪律。

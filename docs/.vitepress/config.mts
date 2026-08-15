@@ -3,8 +3,8 @@ import { withMermaid } from 'vitepress-plugin-mermaid'
 
 export default withMermaid({
   ...defineConfig({
-    title: '现代运维体系',
-    description: '从云原生到 AI 原生的生产控制系统',
+    title: 'AI 原生运维体系',
+    description: '以云原生为底座、终局为 L3 智能自治的生产控制系统',
     base: '/ai-native-ops/',
 
     head: [
@@ -14,7 +14,7 @@ export default withMermaid({
     ],
 
     themeConfig: {
-      siteTitle: '现代运维体系',
+      siteTitle: 'AI 原生运维体系',
       socialLinks: [
         { icon: 'github', link: 'https://github.com/jackiesre721/ai-native-ops' }
       ],
@@ -63,7 +63,6 @@ export default withMermaid({
           items: [
             { text: '第 4 章 K8s 分布式架构与生产治理', link: '/04-k8s-architecture-governance' },
             { text: '第 5 章 声明式 API 与控制循环 ★机械自治', link: '/05-declarative-api-reconcile' },
-            { text: '第 6 章 Containerd 容器运行时生产运维', link: '/06-containerd-runtime' },
             { text: '第 7 章 K8s 资源与精细化调度治理', link: '/07-k8s-scheduling-resources' },
             { text: '第 8 章 K8s 网络、存储与服务治理', link: '/08-k8s-network-storage' }
           ]
@@ -89,13 +88,6 @@ export default withMermaid({
           items: [
             { text: '第 15 章 平台工程与开发者自助体系', link: '/15-platform-engineering' },
             { text: '第 16 章 运维能力平台化与自治闭环 ★运维自治', link: '/16-ops-autonomy-loop' }
-          ]
-        },
-        {
-          text: '第六篇 · AI 原生运维',
-          items: [
-            { text: '第 17 章 AI 负载与异构算力生产运维', link: '/17-ai-workload-gpu-ops' },
-            { text: '第 18 章 AI 推理性能、KV Cache 与智能自治 ★智能自治', link: '/18-ai-inference-kvcache-autonomy' }
           ]
         },
         {

@@ -4,7 +4,7 @@
 > 本章定位：以 ArgoCD 为实例，讲透 GitOps 的**系统原理**——它不是"部署工具"，而是一个运行在 Kubernetes 之外、以 Git 为 Desired State、通过 Kubernetes API 持续执行 Diff + Reconcile 的**控制器系统**。全章按知识递进组织：Push CD 丢掉了什么（10.1）→ OutOfSync 怎么算出来（10.2）→ ArgoCD 五段工作流与两层 Controller（10.3）→ Git/Chart/Values/Image 谁负责什么（10.4）→ Drift 分型与 Ownership Boundary（10.5）→ 可复现交付与 Release Identity（10.6）→ 高可用与瓶颈（10.7）→ 三层权限治理（10.8）→ 故障诊断状态机（10.9）→ 总架构与 SOP（10.10）。
 >
 > **第三篇知识链**：第 9 章讲"如何**定义** Desired State"（Terraform/Helm）；本章讲"如何让系统**持续收敛**到 Desired State"（ArgoCD）；第 11 章讲"如何让新旧 Desired State **安全迁移**"（Rollouts）。三章是一条知识链，不是三个工具。
-> **主线定位**：本章为交付层持续收敛——L1 机械自治在交付域的延伸（Controller of Controllers）（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
+> **主线定位**：本章为交付层持续收敛——L1 机械自治在交付域的延伸（Controller of Controllers）（三层自治总览见 1.5，理论核心为第 5/16 章——L3 智能自治承载于 16.4⑤/16.5 运维 Agent 引擎）。 **主旨绑定（V1.4）**：运维 Agent 制品变更走同一条 GitOps 纪律——分诊器 prompt/评测集变更（16.5②）、规则表/白名单变更（16.4②）不因"智能"而豁免变更治理。 **承上启下**：承第 9 章定义；启第 11 章灰度与 16.5 变更事实（收敛 → 安全迁移/变更供给线）。
 
 > **技术栈锁死**：本章交付栈涉及组件 = ArgoCD + Helm。不引入 Flux 等同类替代。
 > **去工具化**：本章讲的是"声明式 + Git 真相源 + 持续同步（pull + reconcile）"的 GitOps 原理，ArgoCD 只是参考实例，换 Flux 等照样适用（详见 CONVENTIONS 三）。
@@ -1370,3 +1370,5 @@ Desired State（声明期望）
 - [ ] 理解第三篇知识链（定义 Desired → 持续收敛 → 安全迁移）？
 - [ ] 能用八步推导链（Desired→State Store→Controller→Diff→Reconcile→Ownership→Immutable Release→Promotion）评估新交付工具？
 - [ ] 总图随架构演进季度更新？
+
+> **下一章预告**：持续收敛就绪，新版本如何安全上车——第 11 章讲灰度发布与变更风险治理：渐进发布、流量切分、观测-判断-回滚。

@@ -2,9 +2,9 @@
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（原生弹性痛点·与第16章 KEDA 严格解耦） ｜ 状态：终审中 -->
 
 > 本章定位：聚焦 K8s 原生调度与弹性痛点。7.5 小节直击「CPU 指标正常但业务请求排队、负载异常」核心问题，并与第 16 章 KEDA 分层解耦（本章讲原生缺陷，第 16 章讲平台补齐）。落地环境为托管 K8s——ACK 主参考（EKS 对照），节点 = ECS 节点池（4.2），调度与配额约束全部落到节点池标签、污点、多可用区与团队 namespace 上。
-> **主线定位**：本章为调度与资源是 L1 收敛的物理落点——副本、驱逐与弹性都在此兑现（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
+> **主线定位**：本章为调度与资源是 L1 收敛的物理落点——副本、驱逐与弹性都在此兑现（三层自治总览见 1.5，理论核心为第 5/16 章——L3 智能自治承载于 16.4⑤/16.5 运维 Agent 引擎）。 **主旨绑定（V1.4）**：AI 原生运维的第一道原生短板在此暴露——HPA 不懂业务信号（16.3 KEDA 收口）；主旨的演进正从原生短板起步。 **承上启下**：承第 4–5 章（底座与调谐闭环既立，期望状态靠资源与调度兑现）；启第 8 章网络与存储（补齐连接与供给面）——原生弹性短板由 16.3 KEDA 远期收口。
 
-> **边界声明**：本章只讲原生调度与资源治理；业务指标驱动的弹性（KEDA）归第 16 章；AI 算力调度归第 17 章。超出部分归 V2。
+> **边界声明**：本章只讲原生调度与资源治理；业务指标驱动的弹性（KEDA）归第 16 章。超出部分归 V2。
 
 ---
 
@@ -176,7 +176,7 @@ kubectl -n prod get events --sort-by=.lastTimestamp | grep demo-api
 
 1. 无状态 → Deployment，滚动更新参数按容量定（落地实现的参数表）。
 2. 有状态 → 生产优先云产品（RDS/Redis/Kafka 版）；确需上 K8s 才 StatefulSet + 云盘 PV（第 8 章）。
-3. 节点级 → DaemonSet，覆盖所有节点池（含 GPU 池需配容忍，7.3）。
+3. 节点级 → DaemonSet，覆盖所有节点池（含专用池需配容忍，7.3）。
 4. 任务 → Job/CronJob，配重试上限与硬超时，杜绝"跑成服务"。
 
 ### 生产落地实现
@@ -250,7 +250,7 @@ spec:
   template:
     spec:
       tolerations:                         # 节点级 agent 要覆盖所有节点池：须容忍专用池污点（7.3）
-      - { key: dedicated, operator: Exists, effect: NoSchedule }   # 未容忍则 GPU 节点成监控盲区
+      - { key: dedicated, operator: Exists, effect: NoSchedule }   # 未容忍则专用节点成监控盲区
 ```
 
 **④ CronJob 最小骨架**（定时任务三件套：硬超时 + 并发策略 + TTL 清理）：
@@ -313,12 +313,12 @@ spec:
 
 ### 生产问题
 
-某服务 5 个副本全调度到同一个节点，一次故障全挂；更贵的翻法在 GPU 集群：通用负载没约束地混进 GPU 节点池——一台 GPU 节点（如 gn7i，第 17 章）时薪常是通用 ECS 的 5–20 倍（以官网当期价为准），几十元的 sidecar 占着几百元的 GPU（跑错池一天的差价，够这台 sidecar 本该用的通用节点跑一周）。**调度策略缺失，副本分布与成本都听天由命**——高可用的坑之上，云上还叠加了成本的坑。
+某服务 5 个副本全调度到同一个节点，一次故障全挂；更贵的翻法在高配专用池：通用负载没约束地混进高内存专用节点池——一台高配机型的时薪常是通用规格的 3–10 倍（以官网当期价为准），几十元的 sidecar 占着几百元的高配节点（跑错池一天的差价，够这台 sidecar 本该用的通用节点跑一周）。**调度策略缺失，副本分布与成本都听天由命**——高可用的坑之上，云上还叠加了成本的坑。
 
 ### 传统方案失效原因
 
 - **不配拓扑分布/反亲和**：默认调度只看资源够不够，不保证分散，副本可能扎堆。
-- **不用污点隔离专用节点**：GPU 池/专用池对普通 Pod 敞开，成本与干扰双输。
+- **不用污点隔离专用节点**：高配池/专用池对普通 Pod 敞开，成本与干扰双输。
 - **不考虑故障域**：多 AZ 节点池建了（4.2），可用区分散却没进调度约束，白建。
 
 失效根因：**调度只考虑"能不能跑"，不考虑"分散高可用"与"该不该跑"**。
@@ -337,27 +337,27 @@ spec:
 ### 最小可行方案
 
 1. 关键服务 topologySpreadConstraints 跨可用区 maxSkew=1（DoNotSchedule）+ 节点维度软分散。
-2. GPU/专用节点池在节点池定义里打污点 + 标签；AI 负载用 toleration + nodeAffinity 双向锁定（第 17 章）。
-3. 通用负载用 nodeAffinity 软避开 GPU 池，与污点互为双保险。
+2. 高配/专用节点池在节点池定义里打污点 + 标签；专用负载用 toleration + nodeAffinity 双向锁定。
+3. 通用负载用 nodeAffinity 软避开专用池，与污点互为双保险。
 4. PDB 保住自愿中断时的最少副本（节点池自动升级/修复的 drain 全靠它，第 5 章）。
 
 ### 生产落地实现
 
-**① 节点池侧：标签 + 污点**（源头在节点池定义，不在单台节点）——ACK 创建 GPU 节点池时在"节点池 → 标签与污点"配置（Terraform 同名字段；EKS 托管节点组同样支持 labels/taints）：
+**① 节点池侧：标签 + 污点**（源头在节点池定义，不在单台节点）——ACK 创建高配专用节点池时在"节点池 → 标签与污点"配置（Terraform 同名字段；EKS 托管节点组同样支持 labels/taints）：
 
 ```yaml
-# GPU 节点池关键字段（Terraform cs_kubernetes_nodepool；EKS managed node group 等价）
-labels: { node-pool: gpu }       # 节点池标签：调度选择的"正向钩子"
+# 高配专用节点池关键字段（Terraform cs_kubernetes_nodepool；EKS managed node group 等价）
+labels: { node-pool: perf }       # 节点池标签：调度选择的"正向钩子"
 taints:
 - key: dedicated
-  value: gpu
+  value: perf
   effect: NoSchedule              # 生产禁改：无容忍的通用负载一律进不来
 ```
 
 ```bash
-kubectl taint nodes <node-name> dedicated=gpu:NoSchedule    # 应急补污点（正式变更必须回写节点池定义：节点自动修复/重建后手工污点会丢）
-kubectl taint nodes <node-name> dedicated=gpu:NoSchedule-   # 移除污点（排障临时放行）
-kubectl get nodes -L node-pool,topology.kubernetes.io/zone  # 验证：池归属 + 可用区分布
+kubectl taint nodes <node-name> dedicated=perf:NoSchedule    # 应急补污点（正式变更必须回写节点池定义：节点自动修复/重建后手工污点会丢）
+kubectl taint nodes <node-name> dedicated=perf:NoSchedule-   # 移除污点（排障临时放行）
+kubectl get nodes -L node-pool,topology.kubernetes.io/zone   # 验证：池归属 + 可用区分布
 ```
 
 **② 业务侧：通用核心服务完整调度配置**（spec.template.spec 节选，与 7.1 探针同一个 Pod 模板）：
@@ -376,7 +376,7 @@ topologySpreadConstraints:
     matchLabels: { app: demo-api }
 affinity:
   nodeAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:   # 通用负载软避开 GPU 池（污点是硬闸，这是第二道）
+    preferredDuringSchedulingIgnoredDuringExecution:   # 通用负载软避开专用池（污点是硬闸，这是第二道）
     - weight: 100                              # 可调：1–100
       preference:
         nodeSelectorTerms:
@@ -393,7 +393,7 @@ affinity:
           matchLabels: { app: demo-api }
 ```
 
-**③ GPU/AI 负载的反向锁定**（与通用负载对称，第 17 章展开）：对节点池污点配严格一致的 toleration `{key: dedicated, operator: Equal, value: gpu, effect: NoSchedule}`，再加 nodeAffinity 硬约束 `node-pool In [gpu]`——"容忍进得来 + 硬钉只进来"双向锁定，防"容忍了却落在通用池"白付 GPU 价。
+**③ 专用负载的反向锁定**（与通用负载对称）：对节点池污点配严格一致的 toleration `{key: dedicated, operator: Equal, value: perf, effect: NoSchedule}`，再加 nodeAffinity 硬约束 `node-pool In [perf]`——"容忍进得来 + 硬钉只进来"双向锁定，防"容忍了却落在通用池"白付高配价。
 
 **④ PDB**（自愿中断保护，托管节点池的必备护栏）：
 
@@ -449,7 +449,7 @@ value: 1000000            # 可调：全局唯一数值、越大越先保；glob
 
 - [ ] 关键服务 topologySpreadConstraints 跨 zone maxSkew=1（DoNotSchedule）？
 - [ ] 副本数按 AZ 数整数倍，单 AZ 故障容量损失 ≤1/3？
-- [ ] GPU/专用节点池的污点 + 标签在节点池定义里（Git 管控），通用负载避开专用池？
+- [ ] 高配/专用节点池的污点 + 标签在节点池定义里（Git 管控），通用负载避开专用池？
 - [ ] PDB 覆盖所有多副本服务（节点池自动升级 drain 有护栏）？
 - [ ] 关键服务已配 PriorityClass（抢占代价由低优先级负载承担）？
 - [ ] 调度约束进业务 chart 模板，Pending 排障走 4.3 Events 判定表？
@@ -477,7 +477,7 @@ value: 1000000            # 可调：全局唯一数值、越大越先保；glob
 |---|---|---|---|
 | **ResourceQuota** | namespace | CPU/内存/Pod/存储总量上限 | 紧 = 隔离强但易调度失败；松 = 易调度但隔离弱 |
 | **LimitRange** | 容器默认 | 未声明 request/limit 的容器自动兜底 | 默认值要贴团队常态，否则形同虚设 |
-| **request/limit** | 单容器 | request = 调度依据；limit = 运行上限（cgroup，第 6 章） | request 高 = 留量浪费；limit 高 = 超卖险 |
+| **request/limit** | 单容器 | request = 调度依据；limit = 运行上限（cgroup） | request 高 = 留量浪费；limit 高 = 超卖险 |
 
 超卖比例经验值（在线服务基线）：
 
@@ -614,7 +614,7 @@ dev 环境一个失控容器（未设 limit）把 8C 节点 CPU 拉满，同节�
 
 先写清 HPA 的决策公式（理解一切痛点的基础）：**期望副本 = ceil(当前副本数 × 当前指标值 ÷ 目标值)**，指标落在目标 ±10% 容忍区内则不动作。
 
-揭晓思想实验的答案：③。CPU 利用率从来不是负载本身，只是负载的**代理指标**——HPA 用"CPU 忙不忙"去猜"业务忙不忙"，而这个代理在三种负载下会系统性失真：**(a) IO/锁等待型**——线程全挂在等数据库/等锁上（user-svc 跑重查询时的形态），CPU 空转，负载再重利用率也不涨；**(b) 请求排队型**——消费者在等队列消息，CPU 很低而积压一路恶化（开篇的 demo-api）；**(c) GPU 推理**——reco-llm 的 CPU 只负责投喂批次，真瓶颈在显存与吞吐，CPU 永远"不忙"。这不是 HPA 的 bug，是代理指标的边界。
+揭晓思想实验的答案：③。CPU 利用率从来不是负载本身，只是负载的**代理指标**——HPA 用"CPU 忙不忙"去猜"业务忙不忙"，而这个代理在三种负载下会系统性失真：**(a) IO/锁等待型**——线程全挂在等数据库/等锁上（user-svc 跑重查询时的形态），CPU 空转，负载再重利用率也不涨；**(b) 请求排队型**——消费者在等队列消息，CPU 很低而积压一路恶化（开篇的 demo-api）；**(c) 长连接密集型**——im-gateway 的瓶颈在连接数与内存，CPU 大部分时间"不忙"，连接打满也不会触发扩容。这不是 HPA 的 bug，是代理指标的边界。
 
 HPA 只懂资源指标的边界表（哪些负载留在 HPA、哪些必须走）：
 
@@ -624,7 +624,7 @@ HPA 只懂资源指标的边界表（哪些负载留在 HPA、哪些必须走）
 | 常规 Web/API | 基本反映 | 适配（behavior 调优） | — |
 | 队列消费者 | 否（等消息时空转） | 不适配 | KEDA 按队列深度（16.3） |
 | IO/网络密集型 | 否 | 不适配 | KEDA 自定义指标（16.3） |
-| GPU 推理（vLLM） | 否（瓶颈在显存/吞吐） | 不适配 | 推理指标驱动（16.3、第 17/18 章） |
+| 长连接网关 | 否（瓶颈在连接数/内存） | 不适配 | KEDA 按在线连接数（16.3） |
 
 四类痛点（只懂资源指标/信号错配/扩缩滞后/缩容震荡）的解药统一在 16.3——本章动作只有两个：**用边界表划清适用范围，把适配的负载用好**。权衡的核心：**本章只暴露 HPA 的原生缺陷并把它用对；业务指标驱动的解药（KEDA）归第 16 章**——严格分层，不在本章展开。
 
@@ -708,7 +708,7 @@ kubectl -n prod top pods -l app=demo-api  # metrics-server 原始值：HPA 的�
 
 ### 根因定位
 
-拆到机制层，是**HPA 的决策信号（资源指标）与负载真实瓶颈（队列深度/IO/GPU）错位**——这是原生设计边界，不是参数问题；调参治标不治本，换信号才行（16.3）。
+拆到机制层，是**HPA 的决策信号（资源指标）与负载真实瓶颈（队列深度/IO/连接数）错位**——这是原生设计边界，不是参数问题；调参治标不治本，换信号才行（16.3）。
 
 ### 长效治理方案
 
@@ -728,3 +728,5 @@ kubectl -n prod top pods -l app=demo-api  # metrics-server 原始值：HPA 的�
 - [ ] 出现"CPU 正常但排队"先诊断信号错配，而非死调参？
 - [ ] 不适配负载已列入 16.3（KEDA）迁移清单？
 - [ ] 团队对 HPA 保证等级表有共识（只对代理指标负责、不承诺突发瞬时响应与缩容不抖动）？
+
+> **下一章预告**：算力与调度就绪，还差连接与供给——第 8 章讲网络、存储与服务治理：CNI、流量网关、云盘/NAS/OSS 与容灾基线，底座篇至此收束。

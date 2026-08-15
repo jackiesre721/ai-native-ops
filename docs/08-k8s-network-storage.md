@@ -2,7 +2,7 @@
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（严控容灾边界） ｜ 状态：终审中 -->
 
 > 本章定位：讲清托管 K8s（阿里云 ACK 主参考、AWS EKS 对照）的网络、流量入口、存储生命周期与生产容灾极简规范——云 CNI（Terway/VPC-CNI）、SLB/NLB/ALB 流量网关、云盘/NAS/OSS 三种存储、云盘快照与 RPO/RTO 落地。容灾只到快照 + 指标 + 演练原则，深度 DR 归 V2。
-> **主线定位**：本章为网络与存储是负载运行的连接层——L1 自愈的服务面管道（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
+> **主线定位**：本章为网络与存储是负载运行的连接层——L1 自愈的服务面管道（三层自治总览见 1.5，理论核心为第 5/16 章——L3 智能自治承载于 16.4⑤/16.5 运维 Agent 引擎）。 **主旨绑定（V1.4）**：业务负载与治理件的连接与供给层——对象/文件存储（OSS/NAS）、流量入口（网关）与镜像拉取管道都落在此章治理面上。 **承上启下**：承第 7 章资源与调度（补齐连接与供给面，底座篇至此收束）；启第 9 章一切即代码（底座上"跑什么、该是什么样"开始写成代码）。
 
 > **边界声明**：本章不讲自建 CNI（Flannel/Calico）与自建存储；不展开深度服务网格（Istio/Linkerd 全生态）、不展开深度 DR（跨集群/多云容灾）。以上统一归 V2。
 
@@ -336,7 +336,7 @@ spec:
 |---|---|---|---|
 | **语义** | 块设备，RWO 单 Pod 挂载 | NFS 共享文件系统，RWX 多 Pod 读写 | 对象桶，只读挂载为主 |
 | **拓扑** | **可用区级资源**，不能跨 AZ 挂载 | 地域级，跨 AZ 共享 | 地域级，跨 AZ 共享 |
-| **典型负载** | 数据库、消息队列 | 多 Pod 共享目录、训练 checkpoint | 模型只读分发（17.3）、备份归档 |
+| **典型负载** | 数据库、消息队列 | 多 Pod 共享目录、共享工作区 | 静态资源只读分发、备份归档 |
 | **AWS 对照** | EBS gp3 | FSx for Lustre / EFS | S3 Mountpoint |
 
 三种存储也是三份「契约」——承诺什么 / 不承诺什么（选型前先读"不承诺"列，那是踩坑高发区）：
@@ -345,7 +345,7 @@ spec:
 |---|---|---|
 | **云盘（块存储）** | 块语义毫秒级低延迟；与 Pod 同 AZ 绑定——拓扑约束不是缺陷，是承诺的一部分（盘与计算同机房） | 多节点同时挂载：RWO = 单节点独占，多路挂载仅限受限场景，跨节点并发读写不在契约内 |
 | **NAS** | 多 Pod 跨节点共享读写（RWX）；地域级跨 AZ 可见 | 块存储级延迟与 IOPS——NFS 协议开销换来了共享语义 |
-| **OSS** | 海量、便宜、任意多点只读分发 | 写后立读一致（对象存储最终一致）——模型文件的只读场景刚好免疫：文件不可变，从不需要"写完马上读" |
+| **OSS** | 海量、便宜、任意多点只读分发 | 写后立读一致（对象存储最终一致）——只读分发场景刚好免疫：文件不可变，从不需要"写完马上读" |
 
 ESSD 性能级别速查（数字以官网为准）：
 
@@ -368,12 +368,12 @@ ESSD 性能级别速查（数字以官网为准）：
 | 共享需求 | 单 Pod 独占（RWO） | 多 Pod 跨节点并发读写（RWX） | 多 Pod 只读分发（ROX） |
 | 数据形态 | 结构化热数据，要块设备语义 | 目录树、中小文件、中量并发 | 海量大文件、写一次读多次 |
 
-reco-llm 的模型文件为何落 OSS 而不是云盘（③ 的 model-weights）：16 GiB 权重写一次、之后只读分发——用不到块语义的毫秒时延，也不需要单 Pod 独占；放云盘等于为用不到的 IOPS 付费，还把"多点分发"变成"逐副本买盘复刻"。
+静态资源包为何落 OSS 而不是云盘（③ 的 static-assets）：大文件写一次、之后只读分发——用不到块语义的毫秒时延，也不需要单 Pod 独占；放云盘等于为用不到的 IOPS 付费，还把"多点分发"变成"逐副本买盘复刻"。
 
 ### 最小可行方案
 
 1. **动态供给为主**：三种 StorageClass 作为平台基座，PVC 按需触发建卷。
-2. **按负载选型**：数据库 → 云盘 PL1；多 Pod 共享 → NAS 容量型；模型/备份 → OSS。
+2. **按负载选型**：数据库 → 云盘 PL1；多 Pod 共享 → NAS 容量型；静态资源/备份 → OSS。
 3. **云盘必配 WaitForFirstConsumer**：卷跟随 Pod 调度建在同可用区（拓扑含义见①注释）；生产 PVC 回收策略一律 Retain，dev 集群才用 Delete。
 
 ### 生产落地实现
@@ -446,9 +446,9 @@ spec:
       storage: 1Ti               # 声明量用于配额规划，NAS 按实际用量计费
 ```
 
-吞吐量级（通用容量型 NAS，以官网为准）：初始 150 MB/s、容量每 +1 GiB 吞吐 +0.15 MB/s，读上限 10 GB/s、写上限 5 GB/s；**单客户端（单 Pod）读写带宽上限 500 MB/s**——高吞吐靠多 Pod 并行，不靠单挂载点。数字体感：150 MB/s + 0.15 MB/s/GiB 意味着 1 TiB 的 NAS 才约 300 MB/s——小 NAS 冷启动慢，容量堆上去才跑得动；要喂饱 1 GB/s 的 checkpoint 写入约需 6 TiB 起步，否则只能多 Pod 并行（且单 Pod 500 MB/s 封顶）。
+吞吐量级（通用容量型 NAS，以官网为准）：初始 150 MB/s、容量每 +1 GiB 吞吐 +0.15 MB/s，读上限 10 GB/s、写上限 5 GB/s；**单客户端（单 Pod）读写带宽上限 500 MB/s**——高吞吐靠多 Pod 并行，不靠单挂载点。数字体感：150 MB/s + 0.15 MB/s/GiB 意味着 1 TiB 的 NAS 才约 300 MB/s——小 NAS 冷启动慢，容量堆上去才跑得动；要喂饱 1 GB/s 的大文件写入约需 6 TiB 起步，否则只能多 Pod 并行（且单 Pod 500 MB/s 封顶）。
 
-**③ OSS StorageClass + 只读挂载模型文件**（AI 场景锚点，模型分发详见 17.3）：
+**③ OSS StorageClass + 只读挂载静态资源**（写一次读多次的大文件分发锚点）：
 
 ```yaml
 apiVersion: storage.k8s.io/v1
@@ -459,28 +459,28 @@ provisioner: ossplugin.csi.alibabacloud.com
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
 parameters:
-  bucket: "ml-models-prod"                   # 模型桶
+  bucket: "static-assets-prod"               # 静态资源桶（报表模板/前端包等）
   url: "oss-cn-hangzhou.aliyuncs.com"        # OSS Endpoint
-  path: "/qwen2.5-7b"                        # 模型目录
+  path: "/report-templates"                  # 资源目录
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: model-weights
+  name: static-assets
 spec:
-  accessModes: [ReadOnlyMany]    # 只读多点挂载：模型文件不可变（storage 声明仅占位）
+  accessModes: [ReadOnlyMany]    # 只读多点挂载：静态资源不可变（storage 声明仅占位）
   storageClassName: alicloud-oss-readonly
   resources:
     requests:
       storage: 16Gi
 ---
-# Pod 挂载片段（完整 spec 从略）：vLLM/SGLang 推理容器只读挂载模型目录
+# Pod 挂载片段（完整 spec 从略）：报表引擎容器只读挂载资源目录
     volumeMounts:
-    - name: model
-      mountPath: /models
-      readOnly: true                         # 生产禁改：模型目录只读
+    - name: assets
+      mountPath: /opt/assets
+      readOnly: true                         # 生产禁改：资源目录只读
   volumes:
-  - name: model
+  - name: assets
     persistentVolumeClaim:
       claimName: model-weights
 ```
@@ -529,7 +529,7 @@ kubectl get pvc mysql-data                          # Pending 是入口信号
 kubectl describe pvc mysql-data | sed -n '/Events:/,$p'
 kubectl -n kube-system get pods -o wide | grep csi-plugin          # 找目标节点上的 CSI 组件
 kubectl -n kube-system logs <csi-plugin-pod> -c csi-plugin --tail=100 | grep -iE 'error|fail|create'
-# 节点侧：kubelet/容器运行时日志（journalctl -u kubelet，第 6 章）
+# 节点侧：kubelet/容器运行时日志（journalctl -u kubelet）
 ```
 
 Events / 日志关键字 → 判定表（与 4.3 的 Pod Pending 判定表同风格）：
@@ -696,3 +696,5 @@ velero restore create --from-backup prod-20260814 --namespace-mappings prod:prod
 - [ ] 节点多 AZ + StatefulSet 拓扑打散 + WaitForFirstConsumer 三件套齐备？
 - [ ] 资源级备份（ACK 备份中心/Velero）带卷快照，存放异地 OSS/S3？
 - [ ] 季度恢复演练真恢复、真计时并回写 RTO 目标；深度 DR 明确归 V2？
+
+> **下一章预告**：底座能跑了，"该跑成什么样"要写成代码——第 9 章讲一切即代码：Terraform 管集群之下、Helm 管集群之上，Desired State 从此有唯一真相源。

@@ -4,7 +4,7 @@
 > 本章定位：第三篇开篇，**用知识递进的方式建立"声明式系统"的完整心智模型**——先讲清 Drift 为什么必然发生（9.1）、声明式的本质是什么（9.2）、Git 为什么能当真相源（9.3），再进入两大工程载体：Terraform 管集群之下（9.4）、Helm 管集群之上（9.5），最后合成全域知识地图与双层 Drift 治理（9.6）。
 >
 > **分层边界一句话**：**集群之下 Terraform、集群之上 GitOps**——ACK/EKS 集群、节点池、VSwitch、云盘等云资源用 Terraform 声明（alicloud provider 主参考、AWS 对照，9.4）；集群内工作负载用 Helm 标准化打包（9.5），由 ArgoCD 同步（第 10 章）。为什么这样分，是 9.4 要推导的核心知识，不是规定。
-> **主线定位**：本章为定义 Desired State——L1/L2 全部控制循环的期望状态从此而来（目标源）（三层自治总览见 1.5，理论核心为第 5/16/18 章）。
+> **主线定位**：本章为定义 Desired State——L1/L2 全部控制循环的期望状态从此而来（目标源）（三层自治总览见 1.5，理论核心为第 5/16 章——L3 智能自治承载于 16.4⑤/16.5 运维 Agent 引擎）。 **主旨绑定（V1.4）**：智能自治的治理制品同源——分诊器 prompt 与评测集同样进 Git、走 PR（16.5②），Agent 引擎的"大脑"与基础设施共用一条声明式供应链。 **承上启下**：承第 5 章声明式思维（第三篇开篇：底座篇既毕，把 Desired State 写成代码）；启第 10 章 GitOps（定义 Desired State → 持续收敛）。
 
 > **技术栈锁死**：本章涉及组件 = Terraform（alicloud provider，声明集群之下的云资源）+ Helm（集群之上工作负载的标准化打包）。不引入同类替代（Kustomize 等价思想，原理与工具无关，详见 CONVENTIONS 三）。
 > **术语澄清（易混点）**：经典 **IaC（Infrastructure as Code）= Terraform/Pulumi，管的是云基础设施**（VPC/集群/节点池）；**配置即代码 = Helm chart + values，管的是 K8s 清单**（工作负载/服务/ConfigMap）。两者共享"声明式 + Git 真相源 + 可复现"的*思想*，但对象与分层不同——**Helm 不是 IaC，Terraform 也不进集群管 Pod**（为什么，见 9.4 生命周期边界）。
@@ -932,3 +932,5 @@ terraform plan -detailed-exitcode; echo "exit=$?"
 - [ ] 两个真相源仓库（infra-repo / chart-root）结构是否就位？
 - [ ] 新增管控对象是否都按覆盖域总表归域（无第六种管法）？
 - [ ] 团队是否接受并会复述本章的"一切即代码"完整定义？
+
+> **下一章预告**：Desired State 定义好了，谁来持续收敛——第 10 章讲 ArgoCD GitOps：Diff + Reconcile 的控制器系统，把交付变成 L1 机械自治在交付域的延伸。
