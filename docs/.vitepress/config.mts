@@ -63,31 +63,31 @@ export default withMermaid({
           items: [
             { text: '第 4 章 K8s 分布式架构与生产治理', link: '/04-k8s-architecture-governance' },
             { text: '第 5 章 声明式 API 与控制循环 ★机械自治', link: '/05-declarative-api-reconcile' },
-            { text: '第 7 章 K8s 资源与精细化调度治理', link: '/07-k8s-scheduling-resources' },
-            { text: '第 8 章 K8s 网络、存储与服务治理', link: '/08-k8s-network-storage' }
+            { text: '第 6 章 K8s 资源与精细化调度治理', link: '/06-k8s-scheduling-resources' },
+            { text: '第 7 章 K8s 网络、存储与服务治理', link: '/07-k8s-network-storage' }
           ]
         },
         {
           text: '第三篇 · 声明式交付体系',
           items: [
-            { text: '第 9 章 一切即代码：声明式治理全域架构', link: '/09-everything-as-code' },
-            { text: '第 10 章 ArgoCD 声明式 GitOps 生产交付', link: '/10-argocd-gitops' },
-            { text: '第 11 章 灰度发布与生产变更风险治理', link: '/11-canary-release-risk' }
+            { text: '第 8 章 一切即代码：声明式治理全域架构', link: '/08-everything-as-code' },
+            { text: '第 9 章 ArgoCD 声明式 GitOps 生产交付', link: '/09-argocd-gitops' },
+            { text: '第 10 章 灰度发布与生产变更风险治理', link: '/10-canary-release-risk' }
           ]
         },
         {
           text: '第四篇 · 可观测与稳定性',
           items: [
-            { text: '第 12 章 OpenTelemetry 全域可观测体系', link: '/12-opentelemetry-observability' },
-            { text: '第 13 章 告警治理、SLO 与故障应急体系', link: '/13-alerting-slo-incident' },
-            { text: '第 14 章 SRE 稳定性与资源成本治理', link: '/14-sre-stability-cost' }
+            { text: '第 11 章 OpenTelemetry 全域可观测体系', link: '/11-opentelemetry-observability' },
+            { text: '第 12 章 告警治理、SLO 与故障应急体系', link: '/12-alerting-slo-incident' },
+            { text: '第 13 章 SRE 稳定性与资源成本治理', link: '/13-sre-stability-cost' }
           ]
         },
         {
           text: '第五篇 · 平台工程与自治',
           items: [
-            { text: '第 15 章 平台工程与开发者自助体系', link: '/15-platform-engineering' },
-            { text: '第 16 章 运维能力平台化与自治闭环 ★运维自治', link: '/16-ops-autonomy-loop' }
+            { text: '第 14 章 平台工程与开发者自助体系', link: '/14-platform-engineering' },
+            { text: '第 15 章 运维能力平台化与自治闭环 ★运维自治', link: '/15-ops-autonomy-loop' }
           ]
         },
         {

@@ -1,14 +1,14 @@
-# 第8章 Kubernetes网络、存储与服务治理
+# 第7章 Kubernetes网络、存储与服务治理
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（严控容灾边界） ｜ 状态：终审中 -->
 
 > 本章定位：讲清托管 K8s（阿里云 ACK 主参考、AWS EKS 对照）的网络、流量入口、存储生命周期与生产容灾极简规范——云 CNI（Terway/VPC-CNI）、SLB/NLB/ALB 流量网关、云盘/NAS/OSS 三种存储、云盘快照与 RPO/RTO 落地。容灾只到快照 + 指标 + 演练原则，深度 DR 归 V2。
-> **主线定位**：本章为网络与存储是负载运行的连接层——L1 自愈的服务面管道（三层自治总览见 1.5，理论核心为第 5/16 章——L3 智能自治承载于 16.4⑤/16.5 运维 Agent 引擎）。 **主旨绑定（V1.4）**：业务负载与治理件的连接与供给层——对象/文件存储（OSS/NAS）、流量入口（网关）与镜像拉取管道都落在此章治理面上。 **承上启下**：承第 7 章资源与调度（补齐连接与供给面，底座篇至此收束）；启第 9 章一切即代码（底座上"跑什么、该是什么样"开始写成代码）。
+> **主线定位**：本章为网络与存储是负载运行的连接层——L1 自愈的服务面管道（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定（V1.4）**：业务负载与治理件的连接与供给层——对象/文件存储（OSS/NAS）、流量入口（网关）与镜像拉取管道都落在此章治理面上。 **承上启下**：承第 6 章资源与调度（补齐连接与供给面，底座篇至此收束）；启第 8 章一切即代码（底座上"跑什么、该是什么样"开始写成代码）。
 
 > **边界声明**：本章不讲自建 CNI（Flannel/Calico）与自建存储；不展开深度服务网格（Istio/Linkerd 全生态）、不展开深度 DR（跨集群/多云容灾）。以上统一归 V2。
 
 ---
 
-## 8.1 集群基础网络通信原理、主流CNI选型与生产运维规范
+## 7.1 集群基础网络通信原理、主流CNI选型与生产运维规范
 <!-- 云 CNI 视角：Terway 让 Pod 直通 VPC。运维对象不再是封装协议，而是 vSwitch IP 容量、ENI/IP 配额、安全组与 terway-eniip 组件日志四件事。 -->
 
 ### 生产问题
@@ -52,7 +52,7 @@
 
 1. **用共享 ENI 多 IP**（ACK 默认），按 Pod 规模规划 vSwitch（落地实现②）。
 2. **开启 NetworkPolicy**：改 eni-config 重启 Terway 生效；策略先默认拒绝再白名单（附录 A.2）。
-3. **观测三件套 + 升级灰度**：terway-eniip 健康、vSwitch 剩余 IP、跨节点连通性（第 12 章）；Terway 先单节点池验证再全量。
+3. **观测三件套 + 升级灰度**：terway-eniip 健康、vSwitch 剩余 IP、跨节点连通性（第 11 章）；Terway 先单节点池验证再全量。
 
 ### 生产落地实现
 
@@ -76,7 +76,7 @@ spec:
   policyTypes: [Ingress]          # 无 ingress 规则 = 拒绝所有入站
 ```
 
-**② Pod 密度与 vSwitch 容量算例（容量规划核心数字）**：单节点 Pod 上限由实例规格决定——`ecs.g7.4xlarge` = 8 ENI × 单 ENI 30 私有 IP → (8−1)×30 = **210 Pod/节点**（官方示例值，以实例规格文档为准）。vSwitch 网段：20 台满配 = 4,200 个 Pod IP → 至少 **/19**（约 8,190 可用）；常见 /24（254 个）只够半台节点。IP 不够时扩网段或开 IP 前缀模式；对照 AWS 同样按实例配额查表（ENI × 单 ENI IP），另受节点 `--max-pods` 限制。
+**② Pod 密度与 vSwitch 容量算例（容量规划核心数字）**：单节点 Pod 上限由实例规格决定——`ecs.g6.4xlarge` = 8 ENI × 单 ENI 30 私有 IP → (8−1)×30 = **210 Pod/节点**（官方示例值，以实例规格文档为准）。vSwitch 网段：20 台满配 = 4,200 个 Pod IP → 至少 **/19**（约 8,190 可用）；常见 /24（254 个）只够半台节点。IP 不够时扩网段或开 IP 前缀模式；对照 AWS 同样按实例配额查表（ENI × 单 ENI IP），另受节点 `--max-pods` 限制。
 
 **③ 排障制品：Pod 无 IP / 跨节点不通分层定位**：
 
@@ -105,7 +105,7 @@ kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE '
 
 ### 长效治理方案
 
-- vSwitch IP 池纳入容量规划：剩余 <20% 告警（第 12 章），扩容前先核网段。
+- vSwitch IP 池纳入容量规划：剩余 <20% 告警（第 11 章），扩容前先核网段。
 - Terway 健康 + IP 用量 + 连通性探测纳入观测；升级走节点池灰度（4.4 节奏）。
 - NetworkPolicy 默认拒绝为上线基线（附录 A.2），策略集随应用清单走 Git。
 
@@ -129,7 +129,7 @@ kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE '
 
 ---
 
-## 8.2 Service四层、Ingress七层网关流量管控、路由治理与生产最佳实践
+## 7.2 Service四层、Ingress七层网关流量管控、路由治理与生产最佳实践
 <!-- 托管 K8s 视角：Service LoadBalancer 由 CCM 落成 SLB/NLB，七层统一走 ALB Ingress。治理对象从"装控制器"变成"注解参数、证书托管、暴露面管控"。 -->
 
 ### 生产问题
@@ -140,7 +140,7 @@ kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE '
 
 - LoadBalancer 滥用：该走 ClusterIP/ALB 的直接开公网 LB，费用与暴露面双输。
 - Ingress 路由多团队各加各的，冲突无审计；证书手工上传手工续期。
-- 灰度靠手改 Service selector，粗糙且危险（第 11 章讲正确方案）。
+- 灰度靠手改 Service selector，粗糙且危险（第 10 章讲正确方案）。
 
 定论，不再论证：**公网入口必须收口到统一网关 + 证书托管自动续期**。
 
@@ -155,7 +155,7 @@ kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE '
 
 ### 最小可行方案
 
-内部互访 → ClusterIP（默认）；对外 Web → ALB Ingress 统一入口 + TLS；裸 TCP/UDP → Service(LoadBalancer)→NLB 受控暴露。规范底线：公网入口只经 ALB/NLB 且必开删除保护；证书统一托管云证书服务自动续期；灰度走 Argo Rollouts（第 11 章）。
+内部互访 → ClusterIP（默认）；对外 Web → ALB Ingress 统一入口 + TLS；裸 TCP/UDP → Service(LoadBalancer)→NLB 受控暴露。规范底线：公网入口只经 ALB/NLB 且必开删除保护；证书统一托管云证书服务自动续期；灰度走 Argo Rollouts（第 10 章）。
 
 ### 生产落地实现
 
@@ -256,7 +256,7 @@ spec:
               number: 80
 ```
 
-灰度：ALB Ingress 支持 `alb.ingress.kubernetes.io/canary-weight` 等注解做加权灰度，本书统一走 Argo Rollouts（第 11 章），此处不展开。
+灰度：ALB Ingress 支持 `alb.ingress.kubernetes.io/canary-weight` 等注解做加权灰度，本书统一走 Argo Rollouts（第 10 章），此处不展开。
 
 **⑤ CCM 排障**（SLB/NLB 建不出来、注解不生效——复用 4.2 排障路径）：
 
@@ -271,7 +271,7 @@ kubectl describe svc tcp-gateway                           # Events 看 CCM 回�
 
 ### 典型故障案例
 
-某对外服务 TLS 证书过期未续，HTTPS 中断半天——证书是三年前手工上传的，没人记得到期日。整改：证书统一托管云证书服务（自动续期），ALB 监听引用证书 ID，到期前 30 天告警（第 13 章通道），此后再无证书过期事故。
+某对外服务 TLS 证书过期未续，HTTPS 中断半天——证书是三年前手工上传的，没人记得到期日。整改：证书统一托管云证书服务（自动续期），ALB 监听引用证书 ID，到期前 30 天告警（第 12 章通道），此后再无证书过期事故。
 
 点评：**手工管理证书 = 等着过期中断**，托管 + 自动续期是唯一可靠方案。
 
@@ -282,7 +282,7 @@ kubectl describe svc tcp-gateway                           # Events 看 CCM 回�
 ### 长效治理方案
 
 - 入口台账唯一：每个公网入口有 owner、证书、暴露端口，季度审计清理无主入口。
-- 证书 100% 托管 + 自动续期 + 到期告警；Service/Ingress 模板化进基础 chart（第 10 章），灰度统一走 Argo Rollouts（第 11 章）。
+- 证书 100% 托管 + 自动续期 + 到期告警；Service/Ingress 模板化进基础 chart（第 9 章），灰度统一走 Argo Rollouts（第 10 章）。
 
 ### 自动化/自治闭环
 
@@ -306,18 +306,18 @@ spec:
 - [ ] 公网入口只经 ALB/NLB，且删除保护为 on？
 - [ ] 证书统一托管 + 自动续期 + 到期前告警？
 - [ ] NLB 的 zone-maps 至少两个可用区？
-- [ ] IngressClass/AlbConfig 走 Git（第 10 章），CCM 排障路径（4.2）团队熟知？
+- [ ] IngressClass/AlbConfig 走 Git（第 9 章），CCM 排障路径（4.2）团队熟知？
 
 ---
 
-## 8.3 StorageClass、PV/PVC生命周期管理、存储故障闭环处理
+## 7.3 StorageClass、PV/PVC生命周期管理、存储故障闭环处理
 <!-- 云存储视角：CSI 是云盘/NAS/OSS 进集群的门。三种 StorageClass + 拓扑感知绑定 + 快照恢复是主制品；PVC Pending 判定表与 csi-plugin 日志是排障主路径。 -->
 
 ### 生产问题
 
 发布夜 23:40，数据库滚动更新卡住：新 Pod 全部 ContainerCreating，PVC Pending 已 40 分钟——没人知道要去看 PVC 的 Events。**存储是有状态服务的命脉，而它的故障最会伪装（表现为 Pod 起不来）、排查路径最深（PVC → PV → CSI → 云盘）、出错代价最高（数据风险）**。
 
-先做一个思想实验（先自己想答案，再往下读）：云盘只能挂在与它同可用区的节点。你建了一个 3 副本服务（比如 8.4② 那只 Kafka），StorageClass 用了默认的 Immediate 绑定——PVC 建出那一刻，就随机挑了个 AZ 把盘建了。现在扩到第 3 个副本：会发生什么？
+先做一个思想实验（先自己想答案，再往下读）：云盘只能挂在与它同可用区的节点。你建了一个 3 副本服务（比如 7.4② 那只 Kafka），StorageClass 用了默认的 Immediate 绑定——PVC 建出那一刻，就随机挑了个 AZ 把盘建了。现在扩到第 3 个副本：会发生什么？
 
 认真想十秒。答案是：第 3 个副本**永远 Pending**。调度器为它选中的节点在另一个 AZ，而它的卷被钉死在第一个 AZ——卷的拓扑在 PVC 创建那一刻就拍板了，比调度的拓扑决策更早。Events 里就是那句 `volume node affinity conflict`（本节⑤判定表的第一行）。`WaitForFirstConsumer` 的解法由此而来：让卷等第一个 Pod 落位后再建——**卷的拓扑决策必须晚于调度的拓扑决策**，顺序反了就是死锁；本节末的故障案例正是它的现场版。
 
@@ -487,7 +487,7 @@ spec:
 
 > OSS 挂载凭据：新版本 CSI 支持 RRSA/RAM 角色免密，旧版本经 Secret 传 akId/akSecret（以官方文档为准）——能走 RRSA 就不给长期 AK（4.2）。对照 AWS：`s3.csi.aws.com`（S3 Mountpoint），同样主打只读数据面分发。
 
-**④ 云盘快照：备份与恢复闭环**（接 8.4）：
+**④ 云盘快照：备份与恢复闭环**（接 7.4）：
 
 ```yaml
 apiVersion: snapshot.storage.k8s.io/v1
@@ -536,7 +536,7 @@ Events / 日志关键字 → 判定表（与 4.3 的 Pod Pending 判定表同风
 
 | 关键字 | 判定 | 去向 |
 |---|---|---|
-| `volume node affinity conflict` | **拓扑冲突**：Pod 可调度的 AZ 与云盘 AZ 不相交（节点池不均 / 未拓扑打散） | 补节点池 AZ / 拓扑打散（第 7 章） |
+| `volume node affinity conflict` | **拓扑冲突**：Pod 可调度的 AZ 与云盘 AZ 不相交（节点池不均 / 未拓扑打散） | 补节点池 AZ / 拓扑打散（第 6 章） |
 | `storageclass.storage.k8s.io "xxx" not found` | StorageClass 名或 provisioner 写错 | 核对 SC 名与 provisioner |
 | csi-plugin 日志 `InvalidDiskType` / 规格不支持 | 该 AZ 无此规格（PL3 起步 1,261 GiB、AZ 售罄） | 调 PL 级别或容量 / 换 AZ |
 | Events 长时间空白 | 未触发供给或 CSI 组件异常 | 查 csi-plugin Pod 状态与 volumeBindingMode |
@@ -545,7 +545,7 @@ Events / 日志关键字 → 判定表（与 4.3 的 Pod Pending 判定表同风
 
 ### 典型故障案例
 
-多 AZ 集群滚动更新数据库，新副本 PVC 一直 Pending。判定表走查：Events 写着 `volume node affinity conflict`——旧副本的云盘在 AZ-h，新 Pod 被调度到只有 AZ-i 节点的节点池。整改：节点池补齐两 AZ + StatefulSet 加拓扑打散（第 7 章）+ SC 保持 WaitForFirstConsumer，定位 3 分钟。
+多 AZ 集群滚动更新数据库，新副本 PVC 一直 Pending。判定表走查：Events 写着 `volume node affinity conflict`——旧副本的云盘在 AZ-h，新 Pod 被调度到只有 AZ-i 节点的节点池。整改：节点池补齐两 AZ + StatefulSet 加拓扑打散（第 6 章）+ SC 保持 WaitForFirstConsumer，定位 3 分钟。
 
 点评：**PVC Pending 大多不是存储坏了，而是拓扑与供给参数错了**——不看 Events 就只能干等。
 
@@ -555,12 +555,12 @@ Events / 日志关键字 → 判定表（与 4.3 的 Pod Pending 判定表同风
 
 ### 长效治理方案
 
-- 三种 StorageClass 作为平台基座统一交付（基础 chart，第 10 章），业务只声明 PVC；卷使用率与 NAS 吞吐纳入观测（第 12 章）。
+- 三种 StorageClass 作为平台基座统一交付（基础 chart，第 9 章），业务只声明 PVC；卷使用率与 NAS 吞吐纳入观测（第 11 章）。
 - 云盘类负载强制 WaitForFirstConsumer + 多 AZ 节点池 + 拓扑打散；PVC Pending 判定表与 csi-plugin 日志路径进值班手册。
 
 ### 自动化/自治闭环
 
-本节为有状态负载的 L1 机械自治提供数据基础：StatefulSet + PV 稳定绑定（第 7 章），Pod 重建数据不丢、快照让"重建"有回退点——存储层可靠，有状态服务的自愈与扩缩才安全。
+本节为有状态负载的 L1 机械自治提供数据基础：StatefulSet + PV 稳定绑定（第 6 章），Pod 重建数据不丢、快照让"重建"有回退点——存储层可靠，有状态服务的自愈与扩缩才安全。
 
 ### 生产检查清单
 
@@ -572,7 +572,7 @@ Events / 日志关键字 → 判定表（与 4.3 的 Pod Pending 判定表同风
 
 ---
 
-## 8.4 生产容灾极简规范：PV备份、恢复机制、RPO/RTO指标定义与落地原则（不展开深度DR工具）
+## 7.4 生产容灾极简规范：PV备份、恢复机制、RPO/RTO指标定义与落地原则（不展开深度DR工具）
 <!-- 极简容灾：RPO/RTO 指标驱动，落到云盘自动快照、NAS 备份、多 AZ 拓扑与资源级备份四件云能力。跨集群/多云深度 DR 归 V2。 -->
 
 ### 生产问题
@@ -596,7 +596,7 @@ RPO/RTO 落到具体云能力（指标定义 → 承接能力 → 典型值）�
 | **RPO**（恢复点目标） | 可容忍的最大数据丢失窗口 | 云盘自动快照（最快每小时 1 次）；NAS 走云备份 | 核心库 ≤1h，一般服务 ≤24h |
 | **RTO**（恢复时间目标） | 可容忍的最长恢复时间 | 快照恢复新盘 + 重调度；多 AZ 副本接管 | 单点 <10min；AZ 级 30–60min（以演练实测为准） |
 
-数字体感：RPO ≤1h 的另一面是"最坏丢整整一小时数据"——对订单库，就是一小时的单要人工对账；这个数够不够，不由存储团队拍板，要业务方按损失预算签字（与 13.2 的 SLO 定标同一姿势）。
+数字体感：RPO ≤1h 的另一面是"最坏丢整整一小时数据"——对订单库，就是一小时的单要人工对账；这个数够不够，不由存储团队拍板，要业务方按损失预算签字（与 12.2 的 SLO 定标同一姿势）。
 
 故障域分层一行看全：**单节点/单盘（快照恢复 + 重调度，RTO <10min）→ 可用区级（多 AZ 副本接管，RTO 30–60min）→ 地域级深度 DR（V1 不做，归 V2）**。
 
@@ -606,7 +606,7 @@ RPO/RTO 落到具体云能力（指标定义 → 承接能力 → 典型值）�
 
 1. **定指标**：按业务分级定义 RPO/RTO（核心库 1h/10min，一般服务 24h/1h 量级）。
 2. **云盘自动快照**：按 RPO 配策略（每小时 → RPO ≤1h）。
-3. **多 AZ**：节点多 AZ + 云盘同 AZ 拓扑约束（WaitForFirstConsumer，8.3）。
+3. **多 AZ**：节点多 AZ + 云盘同 AZ 拓扑约束（WaitForFirstConsumer，7.3）。
 4. **资源级备份 + 演练**：应用与卷一起备（ACK 备份中心/Velero），季度恢复演练。
 
 ### 生产落地实现
@@ -627,7 +627,7 @@ aliyun ecs ApplyAutoSnapshotPolicy --AutoSnapshotPolicyId sp-xxx --DiskIds.1 d-x
 
 对照 AWS：EBS 自动快照用 **DLM（Data Lifecycle Manager）或 AWS Backup** 配等价的每小时策略。NAS 为地域级共享存储，用**云备份服务**按计划备份（控制台配置，支持异地，以官方文档为准）；OSS 开版本控制/跨区域复制作对象层兜底。
 
-**② 多可用区：节点多 AZ + 云盘同 AZ 拓扑约束**（云盘是 AZ 级资源不能跨 AZ 挂载；8.3 的 WaitForFirstConsumer 保证"盘随 Pod 建"，多 AZ 节点池 + 以下打散 = 单 AZ 故障只影响该 AZ 副本）：
+**② 多可用区：节点多 AZ + 云盘同 AZ 拓扑约束**（云盘是 AZ 级资源不能跨 AZ 挂载；7.3 的 WaitForFirstConsumer 保证"盘随 Pod 建"，多 AZ 节点池 + 以下打散 = 单 AZ 故障只影响该 AZ 副本）：
 
 ```yaml
 apiVersion: apps/v1
@@ -681,9 +681,9 @@ velero restore create --from-backup prod-20260814 --namespace-mappings prod:prod
 
 ### 长效治理方案
 
-- 按业务分级定义 RPO/RTO，写入服务目录（与 13.2 的 SLO 同级管理）；核心云盘自动快照常开（RPO ≤1h），NAS 云备份、OSS 版本化逐项过配置。
+- 按业务分级定义 RPO/RTO，写入服务目录（与 12.2 的 SLO 同级管理）；核心云盘自动快照常开（RPO ≤1h），NAS 云备份、OSS 版本化逐项过配置。
 - 季度恢复演练：真恢复、真接流量、真计时，实测回写 RTO 目标。
-- 关键状态尽量外置 OSS（8.3③ 模式）降低 PV 单点权重；深度 DR（跨集群/多云）归 V2。
+- 关键状态尽量外置 OSS（7.3③ 模式）降低 PV 单点权重；深度 DR（跨集群/多云）归 V2。
 
 ### 自动化/自治闭环
 
@@ -697,4 +697,4 @@ velero restore create --from-backup prod-20260814 --namespace-mappings prod:prod
 - [ ] 资源级备份（ACK 备份中心/Velero）带卷快照，存放异地 OSS/S3？
 - [ ] 季度恢复演练真恢复、真计时并回写 RTO 目标；深度 DR 明确归 V2？
 
-> **下一章预告**：底座能跑了，"该跑成什么样"要写成代码——第 9 章讲一切即代码：Terraform 管集群之下、Helm 管集群之上，Desired State 从此有唯一真相源。
+> **下一章预告**：底座能跑了，"该跑成什么样"要写成代码——第 8 章讲一切即代码：Terraform 管集群之下、Helm 管集群之上，Desired State 从此有唯一真相源。

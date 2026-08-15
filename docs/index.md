@@ -25,5 +25,5 @@ features:
     link: /CONVENTIONS
   - title: 技术栈锁死
     details: VM/Loki/Tempo/OTel/Grafana + Helm/ArgoCD/Rollouts + LLM 建议式分诊引擎，落地一致、不发散。
-    link: /12-opentelemetry-observability
+    link: /11-opentelemetry-observability
 ---

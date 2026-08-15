@@ -1,18 +1,18 @@
-# 第9章 一切即代码：声明式治理全域架构
+# 第8章 一切即代码：声明式治理全域架构
 <!-- 第三篇 声明式交付体系 ｜ 知识型工程章节（V1.2 重构试点） ｜ 状态：终审中 -->
 
-> 本章定位：第三篇开篇，**用知识递进的方式建立"声明式系统"的完整心智模型**——先讲清 Drift 为什么必然发生（9.1）、声明式的本质是什么（9.2）、Git 为什么能当真相源（9.3），再进入两大工程载体：Terraform 管集群之下（9.4）、Helm 管集群之上（9.5），最后合成全域知识地图与双层 Drift 治理（9.6）。
+> 本章定位：第三篇开篇，**用知识递进的方式建立"声明式系统"的完整心智模型**——先讲清 Drift 为什么必然发生（8.1）、声明式的本质是什么（8.2）、Git 为什么能当真相源（8.3），再进入两大工程载体：Terraform 管集群之下（8.4）、Helm 管集群之上（8.5），最后合成全域知识地图与双层 Drift 治理（8.6）。
 >
-> **分层边界一句话**：**集群之下 Terraform、集群之上 GitOps**——ACK/EKS 集群、节点池、VSwitch、云盘等云资源用 Terraform 声明（alicloud provider 主参考、AWS 对照，9.4）；集群内工作负载用 Helm 标准化打包（9.5），由 ArgoCD 同步（第 10 章）。为什么这样分，是 9.4 要推导的核心知识，不是规定。
-> **主线定位**：本章为定义 Desired State——L1/L2 全部控制循环的期望状态从此而来（目标源）（三层自治总览见 1.5，理论核心为第 5/16 章——L3 智能自治承载于 16.4⑤/16.5 运维 Agent 引擎）。 **主旨绑定（V1.4）**：智能自治的治理制品同源——分诊器 prompt 与评测集同样进 Git、走 PR（16.5②），Agent 引擎的"大脑"与基础设施共用一条声明式供应链。 **承上启下**：承第 5 章声明式思维（第三篇开篇：底座篇既毕，把 Desired State 写成代码）；启第 10 章 GitOps（定义 Desired State → 持续收敛）。
+> **分层边界一句话**：**集群之下 Terraform、集群之上 GitOps**——ACK/EKS 集群、节点池、VSwitch、云盘等云资源用 Terraform 声明（alicloud provider 主参考、AWS 对照，8.4）；集群内工作负载用 Helm 标准化打包（8.5），由 ArgoCD 同步（第 9 章）。为什么这样分，是 8.4 要推导的核心知识，不是规定。
+> **主线定位**：本章为定义 Desired State——L1/L2 全部控制循环的期望状态从此而来（目标源）（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定（V1.4）**：智能自治的治理制品同源——分诊器 prompt 与评测集同样进 Git、走 PR（15.5②），Agent 引擎的"大脑"与基础设施共用一条声明式供应链。 **承上启下**：承第 5 章声明式思维（第三篇开篇：底座篇既毕，把 Desired State 写成代码）；启第 9 章 GitOps（定义 Desired State → 持续收敛）。
 
 > **技术栈锁死**：本章涉及组件 = Terraform（alicloud provider，声明集群之下的云资源）+ Helm（集群之上工作负载的标准化打包）。不引入同类替代（Kustomize 等价思想，原理与工具无关，详见 CONVENTIONS 三）。
-> **术语澄清（易混点）**：经典 **IaC（Infrastructure as Code）= Terraform/Pulumi，管的是云基础设施**（VPC/集群/节点池）；**配置即代码 = Helm chart + values，管的是 K8s 清单**（工作负载/服务/ConfigMap）。两者共享"声明式 + Git 真相源 + 可复现"的*思想*，但对象与分层不同——**Helm 不是 IaC，Terraform 也不进集群管 Pod**（为什么，见 9.4 生命周期边界）。
-> **边界声明**：Terraform 本章只展开"集群之下云资源声明"的生产深度（集群/节点池/VSwitch/远端状态/存量收编），模块工程与 CI 底层机制归 V2；集群内同步的 ArgoCD Application YAML 归第 10 章，本章不重复。**2↔9 分工**：第 2 章管"制品不可变"（拿什么运行），本章管"状态声明式"（系统该运行成什么样）。
+> **术语澄清（易混点）**：经典 **IaC（Infrastructure as Code）= Terraform/Pulumi，管的是云基础设施**（VPC/集群/节点池）；**配置即代码 = Helm chart + values，管的是 K8s 清单**（工作负载/服务/ConfigMap）。两者共享"声明式 + Git 真相源 + 可复现"的*思想*，但对象与分层不同——**Helm 不是 IaC，Terraform 也不进集群管 Pod**（为什么，见 8.4 生命周期边界）。
+> **边界声明**：Terraform 本章只展开"集群之下云资源声明"的生产深度（集群/节点池/VSwitch/远端状态/存量收编），模块工程与 CI 底层机制归 V2；集群内同步的 ArgoCD Application YAML 归第 9 章，本章不重复。**2 ↔ 8 分工**：第 2 章管"制品不可变"（拿什么运行），本章管"状态声明式"（系统该运行成什么样）。
 
 ---
 
-## 9.1 配置为什么一定会散：多修改入口、多事实来源与 Drift 的必然性
+## 8.1 配置为什么一定会散：多修改入口、多事实来源与 Drift 的必然性
 
 ### 生产问题
 
@@ -53,19 +53,19 @@ Drift（漂移）：Desired State ≠ Actual State
   + 调谐机制（Actual 持续收敛到 Desired）
 ```
 
-由此给出全章第一个正式定义——**Drift（漂移）：期望状态与实际状态的不一致**。它分两类，分别由不同层的工具检测（9.6 统一治理）：
+由此给出全章第一个正式定义——**Drift（漂移）：期望状态与实际状态的不一致**。它分两类，分别由不同层的工具检测（8.6 统一治理）：
 
 | 类型 | 含义 | 检测工具 |
 |---|---|---|
-| **Terraform Drift** | Terraform 配置 ≠ 云上真实资源 | `terraform plan`（9.4） |
-| **GitOps Drift** | Git 声明 ≠ 集群内实际清单 | ArgoCD diff（第 10 章） |
+| **Terraform Drift** | Terraform 配置 ≠ 云上真实资源 | `terraform plan`（8.4） |
+| **GitOps Drift** | Git 声明 ≠ 集群内实际清单 | ArgoCD diff（第 9 章） |
 
 权衡的核心：**Drift 不是"纪律问题"而是"结构问题"**——只要多入口存在，漂移就是概率 1 的事件；治理 Drift 的唯一解是结构性地消灭多入口，而不是事后比对补救。
 
 ### 最小可行方案
 
 1. **确立唯一声明源**：云资源归 infra 仓库（Terraform），集群内归 chart 仓库群（Helm），每域一个真相源。
-2. **收敛修改入口**：控制台只读、kubectl 应急白名单（13.3）、生产变更只走 Git MR。
+2. **收敛修改入口**：控制台只读、kubectl 应急白名单（12.3）、生产变更只走 Git MR。
 3. **先体检**：扫出游离于声明式管理之外的资源，得到改造基线。
 
 ### 生产落地实现
@@ -82,9 +82,9 @@ kubectl get deploy -A -o json | jq -r '.items[] \
 terraform state list | grep -c alicloud_cs_kubernetes
 ```
 
-- 体检基线与目标数字：**游离 Deployment = 0 个、生产集群 100% 在 Terraform state 内**；存量资源收编走 `terraform import`（9.4 ③）。
+- 体检基线与目标数字：**游离 Deployment = 0 个、生产集群 100% 在 Terraform state 内**；存量资源收编走 `terraform import`（8.4 ③）。
 - 云服务映射：体检对象落在 ACK/EKS 集群与 ECS 节点池；控制台只读通过 RAM/IAM 权限收敛实现（附录 A），而非口头约定。
-- 一个最小的 Drift 现场还原：`kubectl edit deployment order-api` 把副本从 3 改成 5——Git 里 `replicas: 3`，集群里 `replicas: 5`，Desired ≠ Actual 即刻成立。若 ArgoCD 开着 auto-sync，下一次对账会把它改回 3（这既是治理、也是"手改无效"的由来，10.5 详述）；若没开，Drift 静默存在直到某次故障复盘才被发现。
+- 一个最小的 Drift 现场还原：`kubectl edit deployment order-api` 把副本从 3 改成 5——Git 里 `replicas: 3`，集群里 `replicas: 5`，Desired ≠ Actual 即刻成立。若 ArgoCD 开着 auto-sync，下一次对账会把它改回 3（这既是治理、也是"手改无效"的由来，9.5 详述）；若没开，Drift 静默存在直到某次故障复盘才被发现。
 
 ### 典型故障案例
 
@@ -99,8 +99,8 @@ terraform state list | grep -c alicloud_cs_kubernetes
 ### 长效治理方案
 
 - 每域唯一真相源 + 唯一变更入口，作为团队第一结构规则。
-- 游离资源体检纳入周巡检（第 14 章）：游离 Deployment 与不在 state 内的集群清零。
-- 禁止手改 ConfigMap / 控制台手改云资源，例外走应急白名单 + 事后回写（13.3）。
+- 游离资源体检纳入周巡检（第 13 章）：游离 Deployment 与不在 state 内的集群清零。
+- 禁止手改 ConfigMap / 控制台手改云资源，例外走应急白名单 + 事后回写（12.3）。
 
 ### 自动化/自治闭环
 
@@ -116,7 +116,7 @@ terraform state list | grep -c alicloud_cs_kubernetes
 
 ---
 
-## 9.2 声明式的本质：期望状态、实际状态与调谐闭环
+## 8.2 声明式的本质：期望状态、实际状态与调谐闭环
 
 ### 生产问题
 
@@ -163,16 +163,16 @@ Actual State → Desired State
 
 **③ 一个关键推论——可重放性**：调谐是 level-triggered（看当前状态）而非 edge-triggered（看事件）——无论从什么乱七八糟的初始状态出发，只要 Desired 不变，系统最终收敛到同一个结果。**这就是声明式可复现的原理根源**：重放一份声明，得到同一个系统；命令式重放一串动作，得到一团未知。
 
-**④ 两种调谐形态（为 9.4 的分层边界埋下伏笔）**：
+**④ 两种调谐形态（为 8.4 的分层边界埋下伏笔）**：
 
 | | K8s Controller | Terraform |
 |---|---|---|
 | 调谐方式 | 持续循环：observe→compare→reconcile→observe→…（内置、常驻） | 分次执行：plan→apply→结束（由人/CI 决定何时再跑） |
 | 驱动者 | 系统自己 | 外部触发 |
 | 适用对象 | 高频变化的运行时状态（Pod/副本/探针） | 低频高危的基础设施（VPC/集群/节点池） |
-| 详见 | 第 5 章 | 9.4 |
+| 详见 | 第 5 章 | 8.4 |
 
-权衡的核心：**声明式的本质 = 持久化期望状态 + 一个让实际状态收敛到它的机制**；两种形态（常驻调谐 vs 分次编排）没有高下，只有对象适配——这个适配问题正是 9.4 要推导的"Terraform 为什么不该管 Pod"。
+权衡的核心：**声明式的本质 = 持久化期望状态 + 一个让实际状态收敛到它的机制**；两种形态（常驻调谐 vs 分次编排）没有高下，只有对象适配——这个适配问题正是 8.4 要推导的"Terraform 为什么不该管 Pod"。
 
 ### 最小可行方案
 
@@ -202,12 +202,12 @@ kubectl delete pod -l app=demo-api # 随便杀一个 Pod
 # 再次观察：Actual 掉到 2，Controller 检测到 Diff，重建回 3——这就是声明在"兑现自己"
 ```
 
-- 期望状态的载体：集群内是 Helm 渲染出的清单（9.5），集群之下是 Terraform HCL（9.4）。
+- 期望状态的载体：集群内是 Helm 渲染出的清单（8.5），集群之下是 Terraform HCL（8.4）。
 - 云服务映射：本实验跑在 ACK/EKS 上，调谐器由云厂商托管的控制面运行（4.2 职责分层）——你不运维 Controller，但必须理解它在替你调谐。
 
 ### 典型故障案例
 
-某团队把声明式当"一次性初始化脚本"用：apply 完就不管，集群内被手工改得面目全非，声明与实际早已无关。一次灾难恢复想"按声明重建"，才发现声明从未被维护——**没有持续对账的声明式只是摆设**。引入 ArgoCD 持续对账（第 10 章）后，声明才真正成为"活着的期望状态"。
+某团队把声明式当"一次性初始化脚本"用：apply 完就不管，集群内被手工改得面目全非，声明与实际早已无关。一次灾难恢复想"按声明重建"，才发现声明从未被维护——**没有持续对账的声明式只是摆设**。引入 ArgoCD 持续对账（第 9 章）后，声明才真正成为"活着的期望状态"。
 
 点评：**声明 + 调谐缺一不可**——只声明不调谐是文档，只调谐无声明是黑盒。
 
@@ -235,7 +235,7 @@ kubectl delete pod -l app=demo-api # 随便杀一个 Pod
 
 ---
 
-## 9.3 Git 为什么能成为真相源：版本、评审、Diff、回滚与因果链
+## 8.3 Git 为什么能成为真相源：版本、评审、Diff、回滚与因果链
 
 ### 生产问题
 
@@ -270,7 +270,7 @@ Git = Version（任意历史版本可取）
 10:25  git revert B           ← 精确撤销 B，系统回到 A 的已知好状态
 ```
 
-于是配置、变更、部署、故障四者形成完整因果链：**配置 →（变更=commit）→ 部署 → 故障 ←（diff/revert）← Git**。故障可追溯（13.3 SOP 第一步"查最近变更"之所以成立）的前提，就是变更全部以 commit 形式存在。
+于是配置、变更、部署、故障四者形成完整因果链：**配置 →（变更=commit）→ 部署 → 故障 ←（diff/revert）← Git**。故障可追溯（12.3 SOP 第一步"查最近变更"之所以成立）的前提，就是变更全部以 commit 形式存在。
 
 **③ 反例：看起来合理，实际有毒的替代方案**——"用配置中心 + 工单系统管理变更，不强制进 Git"：
 
@@ -291,9 +291,9 @@ Git = Version（任意历史版本可取）
 ### 最小可行方案
 
 1. **变更单一 Git 路径**：所有环境变更经 MR 评审后同步 / apply，无第二条生产变更通道。
-2. **两层评审强度分级**：集群之上（Helm values）变更多、生效快，轻量 MR；集群之下（Terraform）低频高危，plan 输出必读 + 评审制（9.4 ④）。
-3. **故障先查 Git 时间线**：出故障对照提交历史定位可疑变更（13.3 SOP 固化）。
-4. **应急例外有回写纪律**：白名单内先斩后奏，2 小时内回写 Git（13.3）——例外不破坏真相源。
+2. **两层评审强度分级**：集群之上（Helm values）变更多、生效快，轻量 MR；集群之下（Terraform）低频高危，plan 输出必读 + 评审制（8.4 ④）。
+3. **故障先查 Git 时间线**：出故障对照提交历史定位可疑变更（12.3 SOP 固化）。
+4. **应急例外有回写纪律**：白名单内先斩后奏，2 小时内回写 Git（12.3）——例外不破坏真相源。
 
 ### 生产落地实现
 
@@ -302,7 +302,7 @@ Git = Version（任意历史版本可取）
 | 维度 | 传统（工单+控制台） | 声明式 + Git |
 |---|---|---|
 | **变更可控** | 手工、多路径、易错 | 单一路径，MR 评审，原子提交 |
-| **环境一致** | 逐环境手工，漂移 | 同一声明 + 差异文件（9.5 Overlay），基线统一 |
+| **环境一致** | 逐环境手工，漂移 | 同一声明 + 差异文件（8.5 Overlay），基线统一 |
 | **故障可追溯** | 无关联记录 | 变更即 commit，故障与变更可时间线关联 |
 
 **② 故障排查的 Git 三连**（值班手册级制品）：
@@ -315,7 +315,7 @@ git log --since="24 hours ago" --oneline -- envs/prod/
 git diff <正常时的commit>..<最新commit> -- envs/prod/
 
 # ③ 精确撤销（回到已知好状态，比"再改一版"可靠）
-git revert <可疑commit>    # MR 合入后 ArgoCD 自动同步回滚（第 10 章）
+git revert <可疑commit>    # MR 合入后 ArgoCD 自动同步回滚（第 9 章）
 ```
 
 - 云服务映射：代码托管落在云效 Codeup / GitHub（对照 AWS CodeCommit 已限制新用户，GitHub 常用）；MR 评审 + 分支保护是平台能力，配置一次全员受约束。
@@ -334,12 +334,12 @@ git revert <可疑commit>    # MR 合入后 ArgoCD 自动同步回滚（第 10 �
 ### 长效治理方案
 
 - 变更单一路径 + 分级评审 + 应急回写纪律，三者配套（缺一即破）。
-- 故障处置第一步固定为"查 Git 时间线"（13.3 SOP）。
+- 故障处置第一步固定为"查 Git 时间线"（12.3 SOP）。
 - 环境同源 + 差异文件（tfvars / values），禁止逐环境手工对齐。
 
 ### 自动化/自治闭环
 
-本节为 L1 机械自治的"期望状态收敛"环节：Git 单一路径让第 5 章调谐循环的输入可控、第 10 章同步与第 11 章灰度有明确操控对象——变更工程化是后续一切自动化的前提。
+本节为 L1 机械自治的"期望状态收敛"环节：Git 单一路径让第 5 章调谐循环的输入可控、第 9 章同步与第 10 章灰度有明确操控对象——变更工程化是后续一切自动化的前提。
 
 ### 生产检查清单
 
@@ -351,7 +351,7 @@ git revert <可疑commit>    # MR 合入后 ArgoCD 自动同步回滚（第 10 �
 
 ---
 
-## 9.4 Terraform 与集群之下的世界：State 三方模型、Plan 的本质与生命周期边界
+## 8.4 Terraform 与集群之下的世界：State 三方模型、Plan 的本质与生命周期边界
 
 ### 生产问题
 
@@ -425,7 +425,7 @@ K8s Controller 还在持续 reconcile（把两者的变更又改回去/改过来
 | 问 | 答 |
 |---|---|
 | ①解决什么 | 云资源可复现、可审计、可版本化 |
-| ②不用为什么失败 | 控制台手建 = 不可复现 + 漂移无从检测（9.1 因果链） |
+| ②不用为什么失败 | 控制台手建 = 不可复现 + 漂移无从检测（8.1 因果链） |
 | ③内部原理 | 三方比较：Configuration + State + Provider Read → Plan Diff |
 | ④相邻边界 | 管基础设施生命周期，不进运行时（Pod 归 K8s 生态） |
 | ⑤为什么这么选 | 低频高危变更适配"分次编排 + 人工评审"，与 K8s 常驻调谐互补 |
@@ -438,7 +438,7 @@ K8s Controller 还在持续 reconcile（把两者的变更又改回去/改过来
 1. **集群之下全声明**：集群/节点池/VSwitch/云盘只用 Terraform 建（禁控制台手建，存量 import 收编）。
 2. **State 三原则**：远端（OSS/S3）、版本化、加密——State 是资源身份登记簿，丢=失明。
 3. **变更走 plan 评审制**：plan 必读、apply 的必须是评审过的那份 plan。
-4. **守住边界**：Terraform 不进集群管负载（那是 9.5 + 第 10 章的领地）。
+4. **守住边界**：Terraform 不进集群管负载（那是 8.5 + 第 9 章的领地）。
 
 ### 生产落地实现
 
@@ -452,12 +452,12 @@ provider "alicloud" {
 # 多 AZ：两个 VSwitch 是节点池跨可用区的前提（4.2）
 resource "alicloud_vswitch" "zone_a" {
   vpc_id     = var.vpc_id                # 复用已有 VPC，经变量传入
-  cidr_block = "10.10.0.0/20"            # 可调：按网段规划
+  cidr_block = "9.10.0.0/20"            # 可调：按网段规划
   zone_id    = "cn-hangzhou-h"
 }
 resource "alicloud_vswitch" "zone_b" {
   vpc_id     = var.vpc_id
-  cidr_block = "10.10.16.0/20"
+  cidr_block = "9.10.16.0/20"
   zone_id    = "cn-hangzhou-i"
 }
 
@@ -482,7 +482,7 @@ resource "alicloud_cs_kubernetes" "prod" {
     system_disk_category = "cloud_essd"       # 生产禁改：ESSD 才有性能保障
   }
 
-  tags = {                               # 成本标签：FinOps 分账口径（14.3）
+  tags = {                               # 成本标签：FinOps 分账口径（13.3）
     team        = "platform"
     env         = "prod"
     cost-center = "cc-ops-01"            # 可调：按财务口径
@@ -505,7 +505,7 @@ terraform {
 ```
 
 - state lock 一句：并发写保护由 OSS backend 的锁机制承担（新版支持配置 TableStore 表加锁，字段以官方文档为准）；对照 AWS：S3 backend（版本化 + 加密）+ DynamoDB 锁表，机制等价。
-- 状态恢复：bucket 开版本化后，state 误删/写坏可从 OSS 历史版本找回——版本化买到的正是 9.3 的 Version 能力。
+- 状态恢复：bucket 开版本化后，state 误删/写坏可从 OSS 历史版本找回——版本化买到的正是 8.3 的 Version 能力。
 
 **③ 存量收编**（不重建，先纳管再治理）：
 
@@ -549,11 +549,11 @@ terraform apply tfplan        # 评审通过后执行；apply 的必须就是评
 - State 三原则（远端/版本化/加密）+ 定期"找回演练"（半年一次）。
 - plan 评审制 + destroy 双人评审 + `-out` 一次性产物。
 - "云 API 归 Terraform、清单归 Helm"边界进架构评审 checklist，杜绝一把梭。
-- 游离集群 import 收编清零（周巡检，第 14 章）。
+- 游离集群 import 收编清零（周巡检，第 13 章）。
 
 ### 自动化/自治闭环
 
-本节为 L1 机械自治的"基础设施期望状态"环节：Terraform 让集群本身的 Desired 可版本化——第 5 章的调谐闭环跑在"被声明的底座"上，而不是跑在"某人某天点出来的底座"上。同时 `terraform plan` 的定期执行就是云资源层的 Drift 检测（9.6 统一）。
+本节为 L1 机械自治的"基础设施期望状态"环节：Terraform 让集群本身的 Desired 可版本化——第 5 章的调谐闭环跑在"被声明的底座"上，而不是跑在"某人某天点出来的底座"上。同时 `terraform plan` 的定期执行就是云资源层的 Drift 检测（8.6 统一）。
 
 ### 生产检查清单
 
@@ -566,7 +566,7 @@ terraform apply tfplan        # 评审通过后执行；apply 的必须就是评
 
 ---
 
-## 9.5 Helm 与集群之上的标准化：Base / Environment / Service 三层覆盖模型
+## 8.5 Helm 与集群之上的标准化：Base / Environment / Service 三层覆盖模型
 
 ### 生产问题
 
@@ -622,7 +622,7 @@ Service: Order API（业务只写业务项）
 | ①解决什么 | 集群内清单的标准化打包与多环境复用 |
 | ②不用为什么失败 | 200 套 chart 各自为政，公共变更 N 次落地、环境靠复制对齐必漂移 |
 | ③内部原理 | 模板（Go template）+ values 按三层优先级合并成最终清单 |
-| ④相邻边界 | 管集群内配置（不是 IaC）；同步节奏归 ArgoCD（第 10 章） |
+| ④相邻边界 | 管集群内配置（不是 IaC）；同步节奏归 ArgoCD（第 9 章） |
 | ⑤为什么这么选 | 继承+覆盖把"组织标准/环境差异/业务差异"三个变化方向解耦 |
 | ⑥生产怎么落 | 三仓库 + 版本不可变 + 校验三连（下文制品） |
 
@@ -672,7 +672,7 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 resources:
-  requests: { cpu: 250m, memory: 512Mi }   # 可调：7 章按实测校准
+  requests: { cpu: 250m, memory: 512Mi }   # 可调：6 章按实测校准
   limits:   { cpu: "1",   memory: 1Gi }
 probes:
   liveness:  { path: /healthz, initialDelaySeconds: 10 }
@@ -738,7 +738,7 @@ helm diff upgrade order-api chart-root/ -f chart-root/values-prod.yaml -n prod \
 **⑤ 业务接入最小示例**（业务方在 chart-root 提交的全部内容，≤10 行）：
 
 ```yaml
-# 接入新服务 = chart-root 加一个条目 + 一个 MR（同步与灰度由第 10/11 章接手）
+# 接入新服务 = chart-root 加一个条目 + 一个 MR（同步与灰度由第 9/10 章接手）
 order-api:
   enabled: true                     # 条件开关：需在 chart-root 的 dependencies.condition 声明
   base:
@@ -774,7 +774,7 @@ diff chart-root/values-prod.yaml chart-root/values-staging.yaml
 
 ### 自动化/自治闭环
 
-本节为 L1 的"标准化期望状态"环节：GitOps（第 10 章）同步的对象是标准化的 Helm release——没有三层模型，ArgoCD 同步的只是一堆参差不齐的部署物，治理无从谈起。
+本节为 L1 的"标准化期望状态"环节：GitOps（第 9 章）同步的对象是标准化的 Helm release——没有三层模型，ArgoCD 同步的只是一堆参差不齐的部署物，治理无从谈起。
 
 ### 生产检查清单
 
@@ -787,7 +787,7 @@ diff chart-root/values-prod.yaml chart-root/values-staging.yaml
 
 ---
 
-## 9.6 全域统一：双层 Drift 检测、调谐分工与"一切即代码"的完整定义
+## 8.6 全域统一：双层 Drift 检测、调谐分工与"一切即代码"的完整定义
 
 ### 生产问题
 
@@ -801,20 +801,20 @@ diff chart-root/values-prod.yaml chart-root/values-staging.yaml
 
 ### 架构约束与权衡
 
-**① 全域知识地图**（本章终图，把 9.1–9.5 全部知识挂上来）：
+**① 全域知识地图**（本章终图，把 8.1–8.5 全部知识挂上来）：
 
 ```mermaid
 flowchart TB
     EAC["Everything as Code<br/>一切即代码"]
-    DS["Desired State 期望状态<br/>声明式 + 版本化（Git，9.3）"]
+    DS["Desired State 期望状态<br/>声明式 + 版本化（Git，8.3）"]
     EAC --> DS
-    subgraph INFRA["基础设施层 · 集群之下（9.4）"]
+    subgraph INFRA["基础设施层 · 集群之下（8.4）"]
       direction TB
       TF["Terraform 配置"] --> TS["Terraform State<br/>资源身份登记簿"]
       TS --> CP["云 Provider API"]
       CP --> CLOUD["VPC / VSwitch / ACK 集群 / 节点池 / 云盘"]
     end
-    subgraph WORK["工作负载层 · 集群之上（9.5 + 第 10 章）"]
+    subgraph WORK["工作负载层 · 集群之上（8.5 + 第 9 章）"]
       direction TB
       HC["Helm 三层覆盖<br/>Base+Env+Service"] --> ART["Chart 制品（ACR OCI，不可变）"]
       ART --> AR["ArgoCD 同步"]
@@ -839,14 +839,14 @@ flowchart TB
     class DRIFT,RECON base
 ```
 
-读图三问：期望状态在哪？（Git，两层共用）谁在调谐？（Terraform 分次编排 / ArgoCD 常驻对账，两种形态 9.2）Drift 谁检测？（下表）。
+读图三问：期望状态在哪？（Git，两层共用）谁在调谐？（Terraform 分次编排 / ArgoCD 常驻对账，两种形态 8.2）Drift 谁检测？（下表）。
 
 **② 双层 Drift 检测与纠正分工**：
 
 | | 云资源层（Terraform Drift） | 集群内层（GitOps Drift） |
 |---|---|---|
 | 比较双方 | Configuration + State ↔ 云 API 实际 | Git 中的 chart/values ↔ 集群内实际清单 |
-| 检测方式 | `terraform plan`（CI 定期跑，非破坏性） | ArgoCD 常驻对账（OutOfSync 状态，10.5） |
+| 检测方式 | `terraform plan`（CI 定期跑，非破坏性） | ArgoCD 常驻对账（OutOfSync 状态，9.5） |
 | 纠正方式 | 人审后 `apply`（高危层不自动纠正） | auto-sync 自动纠正 / 手动 sync |
 | 典型来源 | 控制台手改云资源、Console 临时扩容 | kubectl edit、应急手改未回写 |
 
@@ -858,31 +858,31 @@ flowchart TB
 
 | 声明域 | 声明式载体 | 真相源 | 承接 |
 |---|---|---|---|
-| **云资源**（集群/节点池/VSwitch/云盘——集群之下） | Terraform HCL（alicloud 主参考、AWS 对照） | infra 仓库（state 入 OSS/S3） | 本章 9.4 |
-| **集群内负载**（工作负载/服务/配置——集群之上） | Helm：基础 chart + 业务 chart + chart-root | chart 仓库群 | 本章 9.5；同步归第 10 章 |
-| **观测规则**（指标/Recording/告警规则） | vmalert 规则 YAML 入 Git | observability 仓库 | 第 12 章 |
-| **告警路由**（分级/收敛/静默） | Alertmanager 配置入 Git | observability 仓库 | 第 13 章 |
-| **发布策略**（灰度/金丝雀/回退） | Argo Rollouts YAML | chart-root | 第 11 章 |
+| **云资源**（集群/节点池/VSwitch/云盘——集群之下） | Terraform HCL（alicloud 主参考、AWS 对照） | infra 仓库（state 入 OSS/S3） | 本章 8.4 |
+| **集群内负载**（工作负载/服务/配置——集群之上） | Helm：基础 chart + 业务 chart + chart-root | chart 仓库群 | 本章 8.5；同步归第 9 章 |
+| **观测规则**（指标/Recording/告警规则） | vmalert 规则 YAML 入 Git | observability 仓库 | 第 11 章 |
+| **告警路由**（分级/收敛/静默） | Alertmanager 配置入 Git | observability 仓库 | 第 12 章 |
+| **发布策略**（灰度/金丝雀/回退） | Argo Rollouts YAML | chart-root | 第 10 章 |
 
-权衡的核心：**全域 = 同一个声明式模型、两段调谐形态、五处落点**——分层不是增加复杂度，而是让每层工具用在生命周期匹配的地方（9.4 推导）。
+权衡的核心：**全域 = 同一个声明式模型、两段调谐形态、五处落点**——分层不是增加复杂度，而是让每层工具用在生命周期匹配的地方（8.4 推导）。
 
 ### 最小可行方案
 
 1. **两张图进团队共识**：知识地图（上图）+ 覆盖域总表——新人第一课。
-2. **双层 Drift 巡检常开**：`terraform plan` 定期跑（CI 周任务）+ ArgoCD 常驻对账 + OutOfSync 告警接 13.1。
+2. **双层 Drift 巡检常开**：`terraform plan` 定期跑（CI 周任务）+ ArgoCD 常驻对账 + OutOfSync 告警接 12.1。
 3. **两个真相源仓库就位**（全域声明的物理形态）：
 
 ```text
 infra-repo/                      # 集群之下：Terraform
 ├── envs/
-│   ├── prod/                    # 每环境一个目录，backend prefix 隔离（9.4 ②）
-│   │   ├── main.tf              # 集群与节点池声明（9.4 ①）
-│   │   ├── backend.tf           # OSS 远端状态（9.4 ②）
+│   ├── prod/                    # 每环境一个目录，backend prefix 隔离（8.4 ②）
+│   │   ├── main.tf              # 集群与节点池声明（8.4 ①）
+│   │   ├── backend.tf           # OSS 远端状态（8.4 ②）
 │   │   └── terraform.tfvars     # 环境差异值
 │   └── staging/
 └── modules/                     # 集群模块沉淀（跨环境复用）
 
-chart-root/                      # 集群之上：Helm 编排（9.5 ①，ArgoCD 挂载点）
+chart-root/                      # 集群之上：Helm 编排（8.5 ①，ArgoCD 挂载点）
 ├── Chart.yaml                   # dependencies 汇总所有业务 chart
 ├── values-dev.yaml              # 环境差异文件
 ├── values-staging.yaml
@@ -899,9 +899,9 @@ terraform plan -detailed-exitcode; echo "exit=$?"
 # exit=0 无漂移；exit=2 有漂移（触发告警，人工评审后 apply）；exit=1 错误
 ```
 
-- 集群内层：ArgoCD 对账周期内自动 diff，OutOfSync 持续超阈值 → 告警接 13.1 通道（10.9 诊断状态机）。
+- 集群内层：ArgoCD 对账周期内自动 diff，OutOfSync 持续超阈值 → 告警接 12.1 通道（9.9 诊断状态机）。
 - 云服务映射：CI 周任务跑在云效/GitHub Actions；state 桶 OSS 版本化兜底误操作；ArgoCD on ACK。
-- 数字：云层巡检 ≥1 次/周（低频层）、集群层对账默认分钟级（10 章）；Drift 从发生到发现的窗口：云层 ≤7 天、集群层 ≤3 分钟。
+- 数字：云层巡检 ≥1 次/周（低频层）、集群层对账默认分钟级（9 章）；Drift 从发生到发现的窗口：云层 ≤7 天、集群层 ≤3 分钟。
 
 ### 典型故障案例
 
@@ -916,21 +916,21 @@ terraform plan -detailed-exitcode; echo "exit=$?"
 ### 长效治理方案
 
 - 知识地图 + 覆盖域总表进新人第一课与架构评审 checklist。
-- 双层 Drift 巡检常开：terraform plan 周任务 + ArgoCD 常驻对账，告警接 13.1。
+- 双层 Drift 巡检常开：terraform plan 周任务 + ArgoCD 常驻对账，告警接 12.1。
 - 新增任何管控对象先问归哪域（表④），不允许出现"第六种管法"。
-- 游离资源体检（9.1）与 Drift 巡检合并进第 14 章技术债周巡检。
+- 游离资源体检（8.1）与 Drift 巡检合并进第 13 章技术债周巡检。
 
 ### 自动化/自治闭环
 
-本节是 L1 机械自治的全域收拢：云资源、集群负载、观测、告警、发布五域全部纳入"声明 + 调谐"模型后，三层自治（L1/L2/L3）才拥有完整的操控面与观测面——**留一个手工域，就是自治的一个盲区**（第 16 章运维自治在此地基上展开）。
+本节是 L1 机械自治的全域收拢：云资源、集群负载、观测、告警、发布五域全部纳入"声明 + 调谐"模型后，三层自治（L1/L2/L3）才拥有完整的操控面与观测面——**留一个手工域，就是自治的一个盲区**（第 15 章运维自治在此地基上展开）。
 
 ### 生产检查清单
 
 - [ ] 团队能对照知识地图说清：Desired 在哪、两层各谁调谐、Drift 谁检测？
 - [ ] `terraform plan -detailed-exitcode` 周任务是否常开（exit=2 告警）？
-- [ ] ArgoCD 常驻对账 + OutOfSync 告警是否接通 13.1？
+- [ ] ArgoCD 常驻对账 + OutOfSync 告警是否接通 12.1？
 - [ ] 两个真相源仓库（infra-repo / chart-root）结构是否就位？
 - [ ] 新增管控对象是否都按覆盖域总表归域（无第六种管法）？
 - [ ] 团队是否接受并会复述本章的"一切即代码"完整定义？
 
-> **下一章预告**：Desired State 定义好了，谁来持续收敛——第 10 章讲 ArgoCD GitOps：Diff + Reconcile 的控制器系统，把交付变成 L1 机械自治在交付域的延伸。
+> **下一章预告**：Desired State 定义好了，谁来持续收敛——第 9 章讲 ArgoCD GitOps：Diff + Reconcile 的控制器系统，把交付变成 L1 机械自治在交付域的延伸。

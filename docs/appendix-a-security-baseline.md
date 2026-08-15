@@ -1,21 +1,21 @@
 # 附录A 云原生与AI原生生产安全基线
 <!-- 附录 ｜ 清单式落地（无新知识·无新组件） ｜ 状态：终审中 -->
 
-> 定位锁死：纯落地检查清单与最小实施方案，不讲解安全理论、不引入新安全组件。每类安全主题统一按四栏表组织：**维度 → 基线要求 → 落地方式 → 检查方法**，每条基线落到可执行的配置片段、命令或云服务名（阿里云主参考、AWS 全程对照）。 **主旨绑定（V1.4）**：AIOps 的权限底座——托管运维 Agent 的云身份按本基线收窄最小权限（16.4 托管对照）。 **承上启下**：全书知识点的权限落地验收（复用正文，无新知识）。
+> 定位锁死：纯落地检查清单与最小实施方案，不讲解安全理论、不引入新安全组件。每类安全主题统一按四栏表组织：**维度 → 基线要求 → 落地方式 → 检查方法**，每条基线落到可执行的配置片段、命令或云服务名（阿里云主参考、AWS 全程对照）。 **主旨绑定（V1.4）**：AIOps 的权限底座——托管运维 Agent 的云身份按本基线收窄最小权限（15.4 托管对照）。 **承上启下**：全书知识点的权限落地验收（复用正文，无新知识）。
 
-> **内容边界锁死**：附录仅复用正文知识点——云身份联邦 RRSA/IRSA（见 4.2）、镜像供应链（见 2 章）、RBAC 与资源配额（见 7.4）、NetworkPolicy 与安全组（见 8.1）、告警通道（见 13.1），用于落地验证，绝不引入正文不存在的新技术、新平台、新架构。CIS 详细加固、OPA 深度归 V2。
+> **内容边界锁死**：附录仅复用正文知识点——云身份联邦 RRSA/IRSA（见 4.2）、镜像供应链（见 2 章）、RBAC 与资源配额（见 6.4）、NetworkPolicy 与安全组（见 7.1）、告警通道（见 12.1），用于落地验证，绝不引入正文不存在的新技术、新平台、新架构。CIS 详细加固、OPA 深度归 V2。
 
 ---
 
 ## A.1 多租户RBAC最小权限与资源配额隔离
 
-> **风险**：cluster-admin 滥用与宽泛 RoleBinding 是集群被攻破后影响面扩大的主因；共享集群再叠加无配额，越权与互害双层失守（见 7.4）。
+> **风险**：cluster-admin 滥用与宽泛 RoleBinding 是集群被攻破后影响面扩大的主因；共享集群再叠加无配额，越权与互害双层失守（见 6.4）。
 
 | 维度 | 基线要求 | 落地方式 | 检查方法 |
 |---|---|---|---|
 | 授权粒度 | 按命名空间+角色授最小权限；cluster-admin 仅限平台团队少数人 | Role/RoleBinding（namespace 级）；CI/CD 用专用 ServiceAccount | `kubectl auth can-i --list --as=<sa> -n <ns>` |
-| 多租户分层 | 平台/业务/治理件三层权限边界（下表） | 每层一份 Role 模板进基础 chart（见 9 章），新建 namespace 默认下发 | 越层/危险动词 `can-i` 反向验证为 no |
-| 资源配额与强隔离 | 每 namespace 配 ResourceQuota+LimitRange；生产/非生产强隔离靠分集群或专用节点池，不靠配额 | 复用 7.4 三层规范（配额/兜底/单容器）+节点池标签/污点 | `kubectl -n <ns> describe resourcequota`；非生产 Pod 不进生产节点池 |
+| 多租户分层 | 平台/业务/治理件三层权限边界（下表） | 每层一份 Role 模板进基础 chart（见 8 章），新建 namespace 默认下发 | 越层/危险动词 `can-i` 反向验证为 no |
+| 资源配额与强隔离 | 每 namespace 配 ResourceQuota+LimitRange；生产/非生产强隔离靠分集群或专用节点池，不靠配额 | 复用 6.4 三层规范（配额/兜底/单容器）+节点池标签/污点 | `kubectl -n <ns> describe resourcequota`；非生产 Pod 不进生产节点池 |
 | 用户认证与授权回收 | 人一律 OIDC/SSO，禁静态 token/证书长期凭证；RoleBinding 定期清理过期/过宽授权 | ACK 对接 RAM/SSO；权限矩阵入 Git 季度评审（2.4 同款） | 无长期 token 存活；过期/过宽绑定清单为零 |
 
 多租户三层模型（评审 R14 补齐）：
@@ -24,7 +24,7 @@
 |---|---|---|
 | 平台团队 | 全集群 | cluster-admin 仅少数值班持有；节点池/集群升级走云控制台+RAM 审批（见 4.4） |
 | 业务团队 | 本团队 namespace | 工作负载读+滚动重启/扩缩容写；禁改 RBAC/Quota/NetworkPolicy |
-| 治理件（分诊器等智能层制品） | 所在 namespace 限定使用 | 只读监控/变更/工单 API（云身份按 16.4⑤ 最小权限）；无生产写路径；禁碰节点池与集群级资源 |
+| 治理件（分诊器等智能层制品） | 所在 namespace 限定使用 | 只读监控/变更/工单 API（云身份按 15.4⑤ 最小权限）；无生产写路径；禁碰节点池与集群级资源 |
 
 落地制品——业务团队开发者最小 Role+RoleBinding（治理件同款模式，取数只读）：
 
@@ -33,7 +33,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: team-developer
-  namespace: team-payment        # namespace = 团队边界（见 7.4）
+  namespace: team-payment        # namespace = 团队边界（见 6.4）
 rules:
 - apiGroups: ["apps"]
   resources: ["deployments", "replicasets"]
@@ -62,13 +62,13 @@ roleRef: { kind: Role, name: team-developer, apiGroup: rbac.authorization.k8s.io
 
 ## A.2 网络隔离基线：安全组与NetworkPolicy
 
-> **风险**：云网络默认"VPC 内互通、Pod 全互通"——横向移动无阻；公网入口不收敛则纵向也无阻（见 8.1）。
+> **风险**：云网络默认"VPC 内互通、Pod 全互通"——横向移动无阻；公网入口不收敛则纵向也无阻（见 7.1）。
 
 | 维度 | 基线要求 | 落地方式 | 检查方法 |
 |---|---|---|---|
 | 公网入口收敛 | 公网只经 WAF→SLB/ALB 进入；节点不对公网暴露业务端口；SSH 22 不对公网 | SLB 仅开 443/80，后端走内网；WAF 回源白名单；SSH 走堡垒机/云助手 | 安全组审计命令核对无业务端口/22 对 0.0.0.0/0 |
-| 节点间最小化 | 节点安全组仅放行所需网段与端口（Terway Pod 直通 VPC，见 8.1） | 收紧集群安全组；控制面访问由 ACK 托管安全组管理（以官方文档为准） | 跨节点 Pod 通、公网端口扫描不通 |
-| Pod 横向隔离 | namespace 先默认拒绝、再按需白名单 | NetworkPolicy（下方 YAML）；Terway 需先开启 NetworkPolicy（见 8.1） | busybox 探测 Pod 验证该通该断（非网关 ns 内 `wget --timeout=3` 业务端口应超时失败） |
+| 节点间最小化 | 节点安全组仅放行所需网段与端口（Terway Pod 直通 VPC，见 7.1） | 收紧集群安全组；控制面访问由 ACK 托管安全组管理（以官方文档为准） | 跨节点 Pod 通、公网端口扫描不通 |
+| Pod 横向隔离 | namespace 先默认拒绝、再按需白名单 | NetworkPolicy（下方 YAML）；Terway 需先开启 NetworkPolicy（见 7.1） | busybox 探测 Pod 验证该通该断（非网关 ns 内 `wget --timeout=3` 业务端口应超时失败） |
 | 出站管控 | 出站默认拒绝，仅放行 DNS 与必要外部端点 | 双向 default-deny+按需放行 | 未放行端点访问超时 |
 
 安全组最小开放基线（端口级四栏）：
@@ -86,7 +86,7 @@ aliyun ecs DescribeSecurityGroupAttribute --SecurityGroupId sg-xxx --RegionId cn
   | jq '.Permissions.Permission[] | {PortRange, SourceCidrIp, IpProtocol, Direction, Policy}'
 ```
 
-NetworkPolicy 制品（default-deny 双向+按需放行；前提：Terway 已开启 NetworkPolicy，见 8.1）：
+NetworkPolicy 制品（default-deny 双向+按需放行；前提：Terway 已开启 NetworkPolicy，见 7.1）：
 
 ```yaml
 # ① 上线第一条策略：默认拒绝（双向）
@@ -120,7 +120,7 @@ spec:
     ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }] # 必须放 DNS，否则双向 deny 即断网
 ```
 
-> **常见错误**：写了 Policy 但未先 default-deny；Terway 未开启 NetworkPolicy，策略静默不生效（见 8.1 头号坑）；标签 typo 策略空转；只管入站不管出站。
+> **常见错误**：写了 Policy 但未先 default-deny；Terway 未开启 NetworkPolicy，策略静默不生效（见 7.1 头号坑）；标签 typo 策略空转；只管入站不管出站。
 
 ---
 
@@ -132,8 +132,8 @@ spec:
 | 维度 | 基线要求 | 落地方式 | 检查方法 |
 |---|---|---|---|
 | Pod 准入 | namespace 打 PSA 标签：baseline 起步强制、restricted 为目标 | Pod Security Admission 标签（下方 YAML），ACK/EKS 托管控制面内置 | 违规 Pod 被 apiserver 直接拒绝 |
-| 运行身份 | 非 root、drop 全部 capabilities、禁 privileged/hostPath/hostNetwork | securityContext 模板进基础 chart（15 章同款） | `kubectl get pod -o yaml` 抽查 securityContext |
-| Secret 管理 | Secret 不进 Git；运行时从 KMS 拉取 | External Secrets Operator+KMS（见 10.5）；CI 侧走 protected/masked Variables（见 2 章） | Git 扫描零命中；ExternalSecret→Secret 生成正常 |
+| 运行身份 | 非 root、drop 全部 capabilities、禁 privileged/hostPath/hostNetwork | securityContext 模板进基础 chart（14 章同款） | `kubectl get pod -o yaml` 抽查 securityContext |
+| Secret 管理 | Secret 不进 Git；运行时从 KMS 拉取 | External Secrets Operator+KMS（见 9.5）；CI 侧走 protected/masked Variables（见 2 章） | Git 扫描零命中；ExternalSecret→Secret 生成正常 |
 | etcd 落盘加密 | Secret 在 etcd 加密存储 | ACK 开启 Secret 落盘加密（对接 KMS）；EKS 建集群时启用 KMS envelope encryption（字段以官方文档为准） | 云控制台确认加密开关已开启 |
 | Pod 云身份 | 访问云资源全走 RRSA/IRSA，AK/SK 零进集群 | SA 打 role-arn 注解+RAM 角色（信任策略见 4.2；权限策略见下方 JSON） | SA 注解覆盖检查+集群 Secret 反扫（下方命令） |
 | RAM 权限最小化 | 角色只授所需资源前缀与动作 | 只读某 OSS 前缀类策略（下方 JSON），宁缺勿滥 | 越权操作被 RAM 拒绝 |
@@ -150,7 +150,7 @@ kubectl get secrets -A -o json \
   | grep -E '(LTAI|AKIA|ASIA)[A-Za-z0-9]{16,}'
 ```
 
-落地制品②——RAM 角色最小权限策略（分诊器只读监控/变更/工单 API，16.4⑤ 引擎云身份）：
+落地制品②——RAM 角色最小权限策略（分诊器只读监控/变更/工单 API，15.4⑤ 引擎云身份）：
 
 ```json
 {
@@ -212,16 +212,16 @@ trivy image --severity HIGH,CRITICAL --exit-code 1 \
 
 ## A.5 AI引擎与智能制品安全
 
-> **风险**：运维 Agent（分诊器/值班问答）是新的高价值入口——模型 API 密钥泄露=账单被盗刷；引擎云身份过宽=可读全量生产数据；prompt/白名单制品被篡改=建议质量被操纵。智能层的安全基线是主旨落地的准入条件（16.4⑤/16.5）。
+> **风险**：运维 Agent（分诊器/值班问答）是新的高价值入口——模型 API 密钥泄露=账单被盗刷；引擎云身份过宽=可读全量生产数据；prompt/白名单制品被篡改=建议质量被操纵。智能层的安全基线是主旨落地的准入条件（15.4⑤/15.5）。
 
 | 维度 | 基线要求 | 落地方式 | 检查方法 |
 |---|---|---|---|
-| 引擎云身份 | 只读监控/变更/工单 API，无生产写路径 | RAM 最小权限（A.3 制品②）+ RRSA/IRSA 绑定 SA（16.4⑤） | `can-i` 反向验证无写动词；A.3 反扫无命中 |
+| 引擎云身份 | 只读监控/变更/工单 API，无生产写路径 | RAM 最小权限（A.3 制品②）+ RRSA/IRSA 绑定 SA（15.4⑤） | `can-i` 反向验证无写动词；A.3 反扫无命中 |
 | 模型 API 密钥 | 密钥不进 Git、不进镜像、不落明文环境变量 | ESO+KMS 注入（同 A.3 Secret 基线）；或云上临时凭据 | Git/镜像双扫描零命中；泄露可一键轮转 |
-| 智能制品完整性 | prompt/评测集/规则表/白名单进 Git、走 PR 评审、版本可回放 | 与基础设施同一条 GitOps 供应链（9/10 章、16.5②） | 台账可回答"这条建议出自哪个 prompt 版本"；直改零容忍 |
-| 建议通道隔离 | 建议只进工单与台账，不直连执行通道 | 分诊器输出两去向（16.4⑤ 铁律）；执行走白名单 | 引擎无 kubectl/argocd 写权限；审计无越权记录 |
-| token 预算护栏 | 日预算封顶，超限自动降级 | 预算配置随分诊器部署（16.4⑤） | 超预算自动降级事件可在台账回查 |
-| 值班问答边界 | 只读查询、无生产写路径 | 16.5④ 制品边界；输出仅诊断与 PromQL 草稿，查询由人工执行 | 问答接口无写动作；越界请求被拒 |
+| 智能制品完整性 | prompt/评测集/规则表/白名单进 Git、走 PR 评审、版本可回放 | 与基础设施同一条 GitOps 供应链（8/9 章、15.5②） | 台账可回答"这条建议出自哪个 prompt 版本"；直改零容忍 |
+| 建议通道隔离 | 建议只进工单与台账，不直连执行通道 | 分诊器输出两去向（15.4⑤ 铁律）；执行走白名单 | 引擎无 kubectl/argocd 写权限；审计无越权记录 |
+| token 预算护栏 | 日预算封顶，超限自动降级 | 预算配置随分诊器部署（15.4⑤） | 超预算自动降级事件可在台账回查 |
+| 值班问答边界 | 只读查询、无生产写路径 | 15.5④ 制品边界；输出仅诊断与 PromQL 草稿，查询由人工执行 | 问答接口无写动作；越界请求被拒 |
 
 > **常见错误**：把模型 API key 写进 values.yaml 提交 Git；给分诊器绑可写 Role"图方便"；prompt 改动不走 PR 直接 kubectl edit（漂移且不可回放）；让问答接口直连 kubectl。
 
@@ -235,9 +235,9 @@ trivy image --severity HIGH,CRITICAL --exit-code 1 \
 |---|---|---|---|
 | 云操作审计 | ActionTrail/CloudTrail 开启，管理写操作全留痕，留存 ≥180 天（=半年内任何一次可疑操作都可回查——只靠云端默认 90 天窗口，上个季度以前就查不动了） | 单账号追踪投递 OSS/SLS（下方命令）+生命周期规则 180 天以上（云端默认可查询窗口约 90 天，以官方文档为准） | 抽查任一敏感操作可查到操作者与时间；生命周期规则核对 |
 | K8s 审计 | API 审计日志开启 | ACK 控制台开启审计日志投递 SLS；EKS 开启 control plane logging（下方命令） | 审计日志库有近期 apiserver 事件 |
-| 敏感操作告警 | RAM 策略变更/安全组变更/角色提权即告警 | ActionTrail→SLS 告警规则（事件名如 CreatePolicy、AuthorizeSecurityGroup），通道接 13.1 分级路由（P1 起步） | 演练一次变更，告警 5 分钟内触达值班 |
-| 智能制品审计 | 白名单/规则表/prompt 变更全留痕（谁、何时、改了什么） | 制品在 Git 走 PR（天然审计）；线上对象变更经 ArgoCD 同步（10 章） | 任意线上规则可回溯到 commit 与评审人 |
-| 建议与执行审计 | 每条建议三字段 + prompt 版本 + 采纳结果 + 自动执行记录落台账 | 13.4 台账扩展字段（16.5③） | 可回答"这条自动扩容出自哪条建议、谁评审的" |
+| 敏感操作告警 | RAM 策略变更/安全组变更/角色提权即告警 | ActionTrail→SLS 告警规则（事件名如 CreatePolicy、AuthorizeSecurityGroup），通道接 12.1 分级路由（P1 起步） | 演练一次变更，告警 5 分钟内触达值班 |
+| 智能制品审计 | 白名单/规则表/prompt 变更全留痕（谁、何时、改了什么） | 制品在 Git 走 PR（天然审计）；线上对象变更经 ArgoCD 同步（9 章） | 任意线上规则可回溯到 commit 与评审人 |
+| 建议与执行审计 | 每条建议三字段 + prompt 版本 + 采纳结果 + 自动执行记录落台账 | 12.4 台账扩展字段（15.5③） | 可回答"这条自动扩容出自哪条建议、谁评审的" |
 
 落地制品——审计开启（命令级，字段以官方文档为准）：
 
@@ -268,18 +268,18 @@ aws eks update-cluster-config --name <cluster> --region <region> \
 
 - [ ] 业务/算法 SA 无 cluster-admin，`kubectl auth can-i` 正反验证通过？
 - [ ] 三层权限模型（平台/业务/算法）有 Role 模板并随基础 chart 下发？
-- [ ] 每 namespace 配 ResourceQuota+LimitRange（7.4 口径），强隔离靠分集群/专用节点池？
+- [ ] 每 namespace 配 ResourceQuota+LimitRange（6.4 口径），强隔离靠分集群/专用节点池？
 
 **A.2 网络隔离**
 
 - [ ] 安全组无 22/业务端口对 0.0.0.0/0，公网仅 WAF/SLB 443/80？
-- [ ] Terway 已开启 NetworkPolicy（见 8.1），业务 ns default-deny+白名单生效，出站仅放行 DNS 与必要端点？
+- [ ] Terway 已开启 NetworkPolicy（见 7.1），业务 ns default-deny+白名单生效，出站仅放行 DNS 与必要端点？
 
 **A.3 Pod/Secret/云身份**
 
 - [ ] AK/SK 零容忍：集群 Secret 与 Git 双扫描零命中，云身份全走 RRSA/IRSA（见 4.2）？
 - [ ] PSA 标签生效（baseline 强制+restricted 审计），特权/hostPath 被拒？
-- [ ] Secret 走 ESO+KMS（见 10.5），etcd 落盘加密已开启？
+- [ ] Secret 走 ESO+KMS（见 9.5），etcd 落盘加密已开启？
 
 **A.4 供应链**
 
@@ -295,14 +295,14 @@ aws eks update-cluster-config --name <cluster> --region <region> \
 **A.6 审计闭环**
 
 - [ ] ActionTrail/CloudTrail 开启且留存 ≥180 天（OSS/S3 生命周期兜底）？
-- [ ] RAM 策略/安全组变更告警已接 13.1 分级通道？
-- [ ] 智能制品变更可回溯到 commit 与评审人，建议与自动执行记录全量落台账（16.5③）？
+- [ ] RAM 策略/安全组变更告警已接 12.1 分级通道？
+- [ ] 智能制品变更可回溯到 commit 与评审人，建议与自动执行记录全量落台账（15.5③）？
 
 ---
 
 ## 附：安全基线一键检测脚本（示例）
 
-> 复用 A.1–A.6 的检查命令串联成只读巡检脚本（示例基线）：输出 PASS/FAIL 与汇总计数，FAIL>0 按附录 A 分级处置。参数按环境调整后接入 CI 或周巡检（14.4）。
+> 复用 A.1–A.6 的检查命令串联成只读巡检脚本（示例基线）：输出 PASS/FAIL 与汇总计数，FAIL>0 按附录 A 分级处置。参数按环境调整后接入 CI 或周巡检（13.4）。
 
 ```bash
 #!/usr/bin/env bash
@@ -352,7 +352,7 @@ echo "----------------------------------------"
 echo "汇总：PASS=$PASS FAIL=$FAIL  （FAIL>0 按附录 A 对应节处置；本脚本为只读示例，接入 CI 前先在测试集群验证判定条件）"
 ```
 
-用法：`./security-baseline-check.sh | tee baseline-report.txt`——报告随台账归档（13.4），趋势异常（如 LATEST 计数上涨）直接开整改项。墨丘里商城 demo-prod 集群的一次典型输出（能想象输出，才算会用）：
+用法：`./security-baseline-check.sh | tee baseline-report.txt`——报告随台账归档（12.4），趋势异常（如 LATEST 计数上涨）直接开整改项。墨丘里商城 demo-prod 集群的一次典型输出（能想象输出，才算会用）：
 
 ```text
 PASS  A.3 集群内无 AK/SK 明文

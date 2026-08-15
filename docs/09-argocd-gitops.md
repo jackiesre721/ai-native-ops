@@ -1,18 +1,18 @@
-# 第10章 ArgoCD声明式GitOps生产交付体系
+# 第9章 ArgoCD声明式GitOps生产交付体系
 <!-- 第三篇 声明式交付体系 ｜ 知识型工程章节（V1.2 重构） ｜ 状态：终审中 -->
 
-> 本章定位：以 ArgoCD 为实例，讲透 GitOps 的**系统原理**——它不是"部署工具"，而是一个运行在 Kubernetes 之外、以 Git 为 Desired State、通过 Kubernetes API 持续执行 Diff + Reconcile 的**控制器系统**。全章按知识递进组织：Push CD 丢掉了什么（10.1）→ OutOfSync 怎么算出来（10.2）→ ArgoCD 五段工作流与两层 Controller（10.3）→ Git/Chart/Values/Image 谁负责什么（10.4）→ Drift 分型与 Ownership Boundary（10.5）→ 可复现交付与 Release Identity（10.6）→ 高可用与瓶颈（10.7）→ 三层权限治理（10.8）→ 故障诊断状态机（10.9）→ 总架构与 SOP（10.10）。
+> 本章定位：以 ArgoCD 为实例，讲透 GitOps 的**系统原理**——它不是"部署工具"，而是一个运行在 Kubernetes 之外、以 Git 为 Desired State、通过 Kubernetes API 持续执行 Diff + Reconcile 的**控制器系统**。全章按知识递进组织：Push CD 丢掉了什么（9.1）→ OutOfSync 怎么算出来（9.2）→ ArgoCD 五段工作流与两层 Controller（9.3）→ Git/Chart/Values/Image 谁负责什么（9.4）→ Drift 分型与 Ownership Boundary（9.5）→ 可复现交付与 Release Identity（9.6）→ 高可用与瓶颈（9.7）→ 三层权限治理（9.8）→ 故障诊断状态机（9.9）→ 总架构与 SOP（9.10）。
 >
-> **第三篇知识链**：第 9 章讲"如何**定义** Desired State"（Terraform/Helm）；本章讲"如何让系统**持续收敛**到 Desired State"（ArgoCD）；第 11 章讲"如何让新旧 Desired State **安全迁移**"（Rollouts）。三章是一条知识链，不是三个工具。
-> **主线定位**：本章为交付层持续收敛——L1 机械自治在交付域的延伸（Controller of Controllers）（三层自治总览见 1.5，理论核心为第 5/16 章——L3 智能自治承载于 16.4⑤/16.5 运维 Agent 引擎）。 **主旨绑定（V1.4）**：运维 Agent 制品变更走同一条 GitOps 纪律——分诊器 prompt/评测集变更（16.5②）、规则表/白名单变更（16.4②）不因"智能"而豁免变更治理。 **承上启下**：承第 9 章定义；启第 11 章灰度与 16.5 变更事实（收敛 → 安全迁移/变更供给线）。
+> **第三篇知识链**：第 8 章讲"如何**定义** Desired State"（Terraform/Helm）；本章讲"如何让系统**持续收敛**到 Desired State"（ArgoCD）；第 10 章讲"如何让新旧 Desired State **安全迁移**"（Rollouts）。三章是一条知识链，不是三个工具。
+> **主线定位**：本章为交付层持续收敛——L1 机械自治在交付域的延伸（Controller of Controllers）（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定（V1.4）**：运维 Agent 制品变更走同一条 GitOps 纪律——分诊器 prompt/评测集变更（15.5②）、规则表/白名单变更（15.4②）不因"智能"而豁免变更治理。 **承上启下**：承第 8 章定义；启第 10 章灰度与 15.5 变更事实（收敛 → 安全迁移/变更供给线）。
 
 > **技术栈锁死**：本章交付栈涉及组件 = ArgoCD + Helm。不引入 Flux 等同类替代。
 > **去工具化**：本章讲的是"声明式 + Git 真相源 + 持续同步（pull + reconcile）"的 GitOps 原理，ArgoCD 只是参考实例，换 Flux 等照样适用（详见 CONVENTIONS 三）。
-> **边界声明**：本章只讲 GitOps 交付；灰度发布归第 11 章；CI 底层机制不展开，归 V2。与第 9 章分工：9 章 = Helm 打包与 IaC 边界（chart 内部结构见 9.5，本章只引用）。
+> **边界声明**：本章只讲 GitOps 交付；灰度发布归第 10 章；CI 底层机制不展开，归 V2。与第 8 章分工：8 章 = Helm 打包与 IaC 边界（chart 内部结构见 8.5，本章只引用）。
 
 ---
 
-## 10.1 为什么传统 Push CD 无法保证状态一致性
+## 9.1 为什么传统 Push CD 无法保证状态一致性
 
 ### 生产问题
 
@@ -86,8 +86,8 @@ Actual Runtime（Pod 实际运行）
 
 ### 最小可行方案
 
-1. **Git 唯一真相源**：部署期望（chart 版本 + values）进 chart-root（编排仓库，9.6）。
-2. **集群内 controller + 持续对账**：ArgoCD 部署在 ACK 集群内，默认每 3 分钟对账一次（可调，10.7），偏离自动纠正。
+1. **Git 唯一真相源**：部署期望（chart 版本 + values）进 chart-root（编排仓库，8.6）。
+2. **集群内 controller + 持续对账**：ArgoCD 部署在 ACK 集群内，默认每 3 分钟对账一次（可调，9.7），偏离自动纠正。
 3. **CI 只产制品 + 改 Git**：CI 不持任何集群凭据，不部署。
 
 ### 生产落地实现
@@ -101,12 +101,12 @@ docker push registry.cn-hangzhou.aliyuncs.com/prod-team/demo-api:20260814-1     
 
 cd chart-root
 yq -i '.image.tag = "20260814-1"' envs/dev/demo-api/values-overrides.yaml             # 唯一"部署动作" = 改 Git 字段
-git commit -am "demo-api: bump 20260814-1" && git push                                # 经 MR 合并，ArgoCD 接管（审批见 10.8）
+git commit -am "demo-api: bump 20260814-1" && git push                                # 经 MR 合并，ArgoCD 接管（审批见 9.8）
 ```
 
 - CI 凭据面：只有 Git 写 token + ACR 推送凭据，**零 kubeconfig**——push 模式最大的攻击面就此消除。
 - 数字：镜像推送后，CI 改 tag → ArgoCD 默认 3 分钟对账周期内检出 → dev 环境变更可见，端到端 ≤5 分钟（无人工环节）。
-- 云服务映射：制品 = ACR 企业版（对照 ECR）；私有 Git = 云效 Codeup（凭据见 10.7）；ArgoCD 本体跑在 ACK 上（对照 EKS 同构）。规模判断：单环境 <10 应用时 push 脚本尚可维持；多环境/多团队起，GitOps 的审计与一致性收益即超过学习成本。
+- 云服务映射：制品 = ACR 企业版（对照 ECR）；私有 Git = 云效 Codeup（凭据见 9.7）；ArgoCD 本体跑在 ACK 上（对照 EKS 同构）。规模判断：单环境 <10 应用时 push 脚本尚可维持；多环境/多团队起，GitOps 的审计与一致性收益即超过学习成本。
 
 ### 典型故障案例
 
@@ -136,11 +136,11 @@ git commit -am "demo-api: bump 20260814-1" && git push                          
 
 ---
 
-## 10.2 GitOps核心原理：Desired State、Live State、Diff 与 Reconciliation
+## 9.2 GitOps核心原理：Desired State、Live State、Diff 与 Reconciliation
 
 ### 生产问题
 
-每个用 ArgoCD 的人都会看到 `Synced / OutOfSync` 这两个状态，多数人的理解停留在"绿色正常、黄色异常"。但**OutOfSync 到底是怎么算出来的？比较的是什么和什么？多久比一次？**——答不出这三问，10.9 的排障就只能是背命令。
+每个用 ArgoCD 的人都会看到 `Synced / OutOfSync` 这两个状态，多数人的理解停留在"绿色正常、黄色异常"。但**OutOfSync 到底是怎么算出来的？比较的是什么和什么？多久比一次？**——答不出这三问，9.9 的排障就只能是背命令。
 
 ### 传统方案失效原因
 
@@ -153,7 +153,7 @@ git commit -am "demo-api: bump 20260814-1" && git push                          
 
 ```text
 Git 里的声明（chart + values）
-        ↓ ArgoCD Render（helm template，见 10.3）
+        ↓ ArgoCD Render（helm template，见 9.3）
 Desired Manifest（期望清单：Deployment/Service/…的完整 YAML）
         ↓
         │              Diff（逐资源、逐字段比较）
@@ -174,23 +174,23 @@ Desired = Live（所有资源所有比较字段）     → Synced
 - **Live 是"归一化"后的**：K8s 会给资源注入默认值（defaults）、系统字段（status/managedFields 等），ArgoCD 比较前会剥离这些——否则永远是"假 OutOfSync"。
 - **Diff 的粒度是字段**：一个资源可以只在一个字段上 OutOfSync——`argocd app diff` 看到的就是这份字段级差异。
 
-**② Reconciliation Loop（对账循环）**：上面的比较不是一次性的，而是常驻循环——默认每 3 分钟对每 个 Application 重复一遍（`timeout.reconciliation`，可调 60s，10.7）。循环每轮做三件事：观察（Fetch + Read Live）→ 比较（Diff）→ 必要时行动（Sync 或标记 OutOfSync）。
+**② Reconciliation Loop（对账循环）**：上面的比较不是一次性的，而是常驻循环——默认每 3 分钟对每 个 Application 重复一遍（`timeout.reconciliation`，可调 60s，9.7）。循环每轮做三件事：观察（Fetch + Read Live）→ 比较（Diff）→ 必要时行动（Sync 或标记 OutOfSync）。
 
 **③ Sync 的三个策略开关**（对账发现差异后怎么办，是策略选择）：
 
 | 开关 | 行为 | 语义 |
 |---|---|---|
 | `automated` | 检出差异自动 Sync | 全自动收敛（dev/staging 用） |
-| `selfHeal` | **集群侧**被手改也拉回 Git | 手改无效化（Drift 纠正，10.5） |
+| `selfHeal` | **集群侧**被手改也拉回 Git | 手改无效化（Drift 纠正，9.5） |
 | `prune` | Git 里删的资源集群里也删 | 完整收敛（危险项，生产慎用） |
 
-权衡的核心：**OutOfSync 不是"异常灯"，而是 Diff 的诚实报告**——它是 Drift 检测的输出（9.6 的集群内层），接下来怎么处置是策略问题（10.5 分型、10.9 诊断）。
+权衡的核心：**OutOfSync 不是"异常灯"，而是 Diff 的诚实报告**——它是 Drift 检测的输出（8.6 的集群内层），接下来怎么处置是策略问题（9.5 分型、9.9 诊断）。
 
 ### 最小可行方案
 
 1. **接受对账模型**：Desired Manifest（渲染后）vs Live Manifest（归一化后），字段级 Diff。
-2. **策略分级**：dev/staging 自动收敛（automated + selfHeal）；生产手动 + CI 门禁（10.7 边界）。
-3. **把 OutOfSync 当信号**：接入告警（10.8 通知），而不是盯着面板看。
+2. **策略分级**：dev/staging 自动收敛（automated + selfHeal）；生产手动 + CI 门禁（9.7 边界）。
+3. **把 OutOfSync 当信号**：接入告警（9.8 通知），而不是盯着面板看。
 
 ### 生产落地实现
 
@@ -209,15 +209,15 @@ argocd app get dev-demo-api --refresh
 # diff 显示：spec.replicas  3 → 5（Git 3，Live 5）
 
 # 4a. 若开了 selfHeal：ArgoCD 自动把副本改回 3（手改无效）
-# 4b. 若未开：OutOfSync 常驻，直到有人处置（回写 Git 或 sync，见 10.5 分型）
+# 4b. 若未开：OutOfSync 常驻，直到有人处置（回写 Git 或 sync，见 9.5 分型）
 ```
 
-- 数字：对账周期默认 3 分钟（可调 60s，代价是 API 与 Git 拉取压力，10.7）；`--refresh` 立即触发一次，不等周期。
+- 数字：对账周期默认 3 分钟（可调 60s，代价是 API 与 Git 拉取压力，9.7）；`--refresh` 立即触发一次，不等周期。
 - 云服务映射：对账发生在 ACK 集群内的 ArgoCD（对照 EKS 同构）；Git 在云效 Codeup / GitHub。
 
 ### 典型故障案例
 
-某团队把"OutOfSync = 坏事"当信条，见到黄灯就 sync，从不看 diff——直到一次 HPA 引发的合法副本变化被他们反复手动"纠正"回 Git 的旧值，容量高峰时服务副本上不去造成过载（HPA 与 Git 的所有权冲突，10.5 详述）。
+某团队把"OutOfSync = 坏事"当信条，见到黄灯就 sync，从不看 diff——直到一次 HPA 引发的合法副本变化被他们反复手动"纠正"回 Git 的旧值，容量高峰时服务副本上不去造成过载（HPA 与 Git 的所有权冲突，9.5 详述）。
 
 点评：**不理解 Diff 的来源，sync 就是蒙眼开枪**——先看差异是什么、从哪来，再决定动不动手。
 
@@ -228,7 +228,7 @@ argocd app get dev-demo-api --refresh
 ### 长效治理方案
 
 - 对账模型（Desired/Live/Diff）进团队共同语言；排查一律从 `argocd app diff` 开始。
-- 策略分级：自动化只给可逆环境；生产的手动边界与 CI 门禁见 10.7。
+- 策略分级：自动化只给可逆环境；生产的手动边界与 CI 门禁见 9.7。
 
 ### 自动化/自治闭环
 
@@ -244,11 +244,11 @@ argocd app get dev-demo-api --refresh
 
 ---
 
-## 10.3 ArgoCD如何工作：Fetch → Render → Diff → Sync → Health 与两层控制器
+## 9.3 ArgoCD如何工作：Fetch → Render → Diff → Sync → Health 与两层控制器
 
 ### 生产问题
 
-上一节讲了 Diff 的计算模型，但还有一个关键问题没回答：**Git 里放的是 Helm chart + values，K8s 认识 chart 吗？中间发生了什么？**——不理解 Render 环节，就理解不了 Repo Server 为什么存在、为什么会成为瓶颈（10.7），也理解不了"ArgoCD 到底管到哪一层"。
+上一节讲了 Diff 的计算模型，但还有一个关键问题没回答：**Git 里放的是 Helm chart + values，K8s 认识 chart 吗？中间发生了什么？**——不理解 Render 环节，就理解不了 Repo Server 为什么存在、为什么会成为瓶颈（9.7），也理解不了"ArgoCD 到底管到哪一层"。
 
 ### 传统方案失效原因
 
@@ -273,11 +273,11 @@ Fetch：拉取 Git 仓库（chart-root、service-chart）与 chart 制品（ACR 
    ↓
 Render：调用 helm template，把 chart + values 渲染成 Kubernetes Manifest
    ↓        （K8s 只认识 Manifest——Deployment/Service/ConfigMap/Ingress）
-Diff：Desired Manifest vs Live Manifest（10.2）
+Diff：Desired Manifest vs Live Manifest（9.2）
    ↓
 Sync：把差异 apply 到 K8s API
    ↓
-Health：观察同步后的资源健康（Healthy/Progressing/Degraded，10.9）
+Health：观察同步后的资源健康（Healthy/Progressing/Degraded，9.9）
 ```
 
 **② 两层 Controller 模型（本章核心图）**：
@@ -305,7 +305,7 @@ flowchart TB
 
 读图三句话：**ArgoCD 不直接运行应用，它只把 Desired 写进 K8s API；真正运行应用的是 K8s 自己的控制器群（Deployment/HPA/调度器/kubelet）；两层控制器各调谐各的**——外层管"部署什么"，内层管"运行成什么样"。这也解释了一个现象：ArgoCD 显示 Synced 的同时，Pod 可能正在被内层控制器重建——两层的"正常"互不干扰。
 
-**③ 组件与五段的映射**（为什么需要这些组件，10.7 展开 HA）：
+**③ 组件与五段的映射**（为什么需要这些组件，9.7 展开 HA）：
 
 | 组件 | 承担的五段 | 一句话 |
 |---|---|---|
@@ -314,11 +314,11 @@ flowchart TB
 | **api-server** | （人机入口） | UI/CLI/API，读写 Application |
 | **Redis** | （缓存） | 加速比较，**不是事实来源**（丢了缓存=重新渲染，不丢状态） |
 
-权衡的核心：**Helm 管生成、ArgoCD 管对账与同步、K8s 管运行**——三个系统拼成一条链，任何一个的职责被误解，排障方向就会错（Render 问题查 chart/values，Sync 问题查 ArgoCD，运行问题查 K8s，10.9 状态机正是按这个链分叉的）。
+权衡的核心：**Helm 管生成、ArgoCD 管对账与同步、K8s 管运行**——三个系统拼成一条链，任何一个的职责被误解，排障方向就会错（Render 问题查 chart/values，Sync 问题查 ArgoCD，运行问题查 K8s，9.9 状态机正是按这个链分叉的）。
 
 ### 最小可行方案
 
-1. **建立五段心智**：Fetch→Render→Diff→Sync→Health，排障先定位段（10.9）。
+1. **建立五段心智**：Fetch→Render→Diff→Sync→Health，排障先定位段（9.9）。
 2. **记住三层分工**：Helm=模板、ArgoCD=对账同步、K8s=运行。
 3. **区分两层控制器**：交付层（ArgoCD）与运行层（K8s），各自调谐各自的 Desired。
 
@@ -338,9 +338,9 @@ helm template demo-api service-chart/demo-api \
 argocd app sync dev-demo-api --dry-run
 ```
 
-- values 分层与覆盖优先级（chart 默认 → 环境基线 → 覆盖层，后者覆盖前者）承接 9.5 三层覆盖模型。
-- 云服务映射：Fetch 的对象 = 云效 Codeup（chart-root/service-chart）+ ACR OCI（基础 chart 制品，9.5 ③）；Render 发生在 ACK 内的 repo-server。
-- 数字：一次 Helm 渲染典型耗时百毫秒级，但 1000 个 Application × 每 3 分钟 = 持续的渲染负载——这是 10.7 瓶颈推导的起点。
+- values 分层与覆盖优先级（chart 默认 → 环境基线 → 覆盖层，后者覆盖前者）承接 8.5 三层覆盖模型。
+- 云服务映射：Fetch 的对象 = 云效 Codeup（chart-root/service-chart）+ ACR OCI（基础 chart 制品，8.5 ③）；Render 发生在 ACK 内的 repo-server。
+- 数字：一次 Helm 渲染典型耗时百毫秒级，但 1000 个 Application × 每 3 分钟 = 持续的渲染负载——这是 9.7 瓶颈推导的起点。
 
 ### 典型故障案例
 
@@ -371,7 +371,7 @@ argocd app sync dev-demo-api --dry-run
 
 ---
 
-## 10.4 Git、Chart、Values、Image：四类制品到底谁负责什么
+## 9.4 Git、Chart、Values、Image：四类制品到底谁负责什么
 
 ### 生产问题
 
@@ -409,15 +409,15 @@ Image（ACR 里的镜像制品）       = Artifact：不可变的运行时制品
 
 **② 多源 Application 的知识读法**（YAML 制品见下）：第一源是 chart-root（只取 values，`ref: values`），第二源是业务 chart 仓库（取 chart 并锁版本）——**两个源各取所需，职责物理隔离**。
 
-**③ 反例：看起来合理，实际有毒——"全部塞 chart-root"**：把业务 chart 也复制进 chart-root，仓库短期简单了，但 chart 演进（平台组）与版本发布（业务组）的变更历史立刻混流，权限无法分级（10.8 的 CODEOWNERS 无从下手），基础 chart 的版本锁（dependencies.version）失去意义——回到单仓库耦合的老问题。
+**③ 反例：看起来合理，实际有毒——"全部塞 chart-root"**：把业务 chart 也复制进 chart-root，仓库短期简单了，但 chart 演进（平台组）与版本发布（业务组）的变更历史立刻混流，权限无法分级（9.8 的 CODEOWNERS 无从下手），基础 chart 的版本锁（dependencies.version）失去意义——回到单仓库耦合的老问题。
 
-权衡的核心：**按生命周期拆仓库**：变化节奏相同的东西放一起（环境版本差异都在 chart-root），节奏不同的分开（模板演进在 chart 仓库）——这和 9.5 三层覆盖模型是同一思想在不同层的应用。
+权衡的核心：**按生命周期拆仓库**：变化节奏相同的东西放一起（环境版本差异都在 chart-root），节奏不同的分开（模板演进在 chart 仓库）——这和 8.5 三层覆盖模型是同一思想在不同层的应用。
 
 ### 最小可行方案
 
-1. **三仓库各归其位**：基础 chart（模板）/ 业务 chart（薄壳）/ chart-root（版本编排），术语与 9.5 一致。
+1. **三仓库各归其位**：基础 chart（模板）/ 业务 chart（薄壳）/ chart-root（版本编排），术语与 8.5 一致。
 2. **Application 多源引用**：values 取自 chart-root、chart 取自 service-chart 并锁版本。
-3. **CI 只碰 values**：日常发布 = 改 chart-root 的一个 tag 字段（10.1 ②）。
+3. **CI 只碰 values**：日常发布 = 改 chart-root 的一个 tag 字段（9.1 ②）。
 
 ### 生产落地实现
 
@@ -430,25 +430,25 @@ metadata:
   name: demo-api-dev
   namespace: argocd                 # Application 必须建在 ArgoCD 所在 namespace
 spec:
-  project: default                  # 项目隔离与 RBAC 见 10.8
+  project: default                  # 项目隔离与 RBAC 见 9.8
   sources:                          # ArgoCD ≥2.6 多源：第一源只作 values 引用
   - repoURL: https://codeup.aliyun.com/<org>/chart-root.git      # 编排仓库：只放 values，不放 chart
     targetRevision: main
     ref: values
   - repoURL: https://codeup.aliyun.com/<org>/service-chart.git   # 业务 chart（service-chart 仓库）
-    targetRevision: 1.4.2           # 生产禁改: 禁用 latest/head，必须锁版本（可复现，10.6）
+    targetRevision: 1.4.2           # 生产禁改: 禁用 latest/head，必须锁版本（可复现，9.6）
     chart: demo-api
     helm:
-      valueFiles:                   # 分层引用：后者覆盖前者（chart 内默认值 → 环境基线 → 覆盖层，9.5）
+      valueFiles:                   # 分层引用：后者覆盖前者（chart 内默认值 → 环境基线 → 覆盖层，8.5）
       - $values/envs/dev/demo-api/values.yaml
       - $values/envs/dev/demo-api/values-overrides.yaml
   destination:
     server: https://kubernetes.default.svc   # ArgoCD 所在 ACK 集群；多集群舰队归 V2
     namespace: dev
   syncPolicy:
-    automated:                      # 风险: automated 只用于 dev/staging——生产禁用，改"CI 校验 + 人工 sync"（10.7）
+    automated:                      # 风险: automated 只用于 dev/staging——生产禁用，改"CI 校验 + 人工 sync"（9.7）
       prune: true                   # 风险: Git 删除资源会连集群一起删；生产禁用
-      selfHeal: true                # 风险: kubectl 手改会被自动回滚——应急止血（改副本）须先停 auto-sync（13.3/10.9）
+      selfHeal: true                # 风险: kubectl 手改会被自动回滚——应急止血（改副本）须先停 auto-sync（12.3/9.9）
     syncOptions:
     - CreateNamespace=true
     - PruneLast=true                # 先建后删，降低 prune 的瞬时伤害
@@ -456,8 +456,8 @@ spec:
 
 automated 的选择题：dev/staging 开 `automated + prune + selfHeal`（快速收敛、试错成本低）；**生产关 automated，CI 里用 `argocd app diff prod-demo-api --exit-code` 做门禁（非零退出 = 有未同步差异，人工 review 后手动 sync）**——用一次人工确认换生产的变更安全。
 
-- 云服务映射：两个私有仓库 = 云效 Codeup（凭据配置见 10.7 ④）；chart 制品（基础 chart）分发走 ACR OCI（9.5 ③）。
-- 数字：新业务接入 = 提交一个 values 目录 + 一个 MR，≤10 分钟（ApplicationSet 自动建档，10.8 ③）。
+- 云服务映射：两个私有仓库 = 云效 Codeup（凭据配置见 9.7 ④）；chart 制品（基础 chart）分发走 ACR OCI（8.5 ③）。
+- 数字：新业务接入 = 提交一个 values 目录 + 一个 MR，≤10 分钟（ApplicationSet 自动建档，9.8 ③）。
 
 ### 典型故障案例
 
@@ -476,7 +476,7 @@ automated 的选择题：dev/staging 开 `automated + prune + selfHeal`（快速
 
 ### 自动化/自治闭环
 
-本节为交付自治确立**操控对象的清晰边界**：自治系统（L2 的自动回滚、11 章的灰度晋升）改的永远是 chart-root 里的 values 字段，而不是集群—— Desired 的入口唯一，自动化才安全。
+本节为交付自治确立**操控对象的清晰边界**：自治系统（L2 的自动回滚、10 章的灰度晋升）改的永远是 chart-root 里的 values 字段，而不是集群—— Desired 的入口唯一，自动化才安全。
 
 ### 生产检查清单
 
@@ -488,7 +488,7 @@ automated 的选择题：dev/staging 开 `automated + prune + selfHeal`（快速
 
 ---
 
-## 10.5 Drift分型与Ownership Boundary：为什么Desired ≠ Live不一定是故障
+## 9.5 Drift分型与Ownership Boundary：为什么Desired ≠ Live不一定是故障
 
 ### 生产问题
 
@@ -505,12 +505,12 @@ OutOfSync 出现时，新手的第一反应是"出事了，赶紧 sync"；老手
 
 ```text
 Desired ≠ Live
- ├── ① 人为修改（kubectl 直改/应急手改）        → 处置：回写 Git（13.3 的 2h 回写制度）
+ ├── ① 人为修改（kubectl 直改/应急手改）        → 处置：回写 Git（12.3 的 2h 回写制度）
  ├── ② Git 配置错误（声明本身就是错的）          → 处置：修 Git，这是真故障
  ├── ③ K8s 控制器合法修改（HPA 改 replicas）    → 处置：Git 放弃该字段所有权（ignoreDifferences）
  ├── ④ 准入 Webhook 注入（mutating 注入字段）   → 处置：同 ③，忽略被注入字段
  ├── ⑤ 外部控制器管理（ESO 渲染 Secret.data）   → 处置：Git 管 ExternalSecret，不管 Secret.data
- └── ⑥ ArgoCD/Helm 渲染问题（values 优先级错）  → 处置：修 chart/values（Render 段问题，10.3）
+ └── ⑥ ArgoCD/Helm 渲染问题（values 优先级错）  → 处置：修 chart/values（Render 段问题，9.3）
 ```
 
 **② Ownership Boundary（字段所有权边界）——六类分型背后的统一原则**：
@@ -520,13 +520,13 @@ Desired ≠ Live
 三个典型所有权裁决：
 
 ```text
-HPA 在管 replicas（7.5）
+HPA 在管 replicas（6.5）
    → Git 不应该管 Deployment.spec.replicas：ignoreDifferences 放行，HPA 全权接管
 
 ESO 管理 Secret（附录 A.3）
    → Git 管 ExternalSecret（引用与规则），不管 Secret.data（运行时渲染结果）
 
-人为应急手改（13.3）
+人为应急手改（12.3）
    → 字段仍归 Git：手改只是临时态，2h 内回写 Git 恢复唯一真相
 ```
 
@@ -534,7 +534,7 @@ ESO 管理 Secret（附录 A.3）
 
 | 原因 | 判定特征 | 处置 |
 |---|---|---|
-| **手动改了集群** | diff 只有少量字段（副本/镜像），Git 侧无对应 commit | 回写 Git（13.3 应急后 2h 回写）；或开 selfHeal 让其纠正 |
+| **手动改了集群** | diff 只有少量字段（副本/镜像），Git 侧无对应 commit | 回写 Git（12.3 应急后 2h 回写）；或开 selfHeal 让其纠正 |
 | **helm 参数漂移**（从 helm release 迁移残留） | diff 成片集中在 metadata/labels/annotations | 一次性 `argocd app sync --force` 接管；迁移细节以官方文档"migrating from Helm"为准 |
 | **控制器/webhook 合法改写**（HPA/准入注入） | diff 恒定在同一字段，改了又回来 | 进 ignoreDifferences 白名单（下） |
 | **secret 渲染差异**（secret 不进 Git，由 ESO 渲染） | diff 只有 Secret 的 data | Secret 交 ESO/KMS 管（附录 A.3），Git 不追其 data |
@@ -546,7 +546,7 @@ spec:
   - group: apps
     kind: Deployment
     jsonPointers:
-    - /spec/replicas        # HPA 在管（7.5），Git 让渡此字段所有权
+    - /spec/replicas        # HPA 在管（6.5），Git 让渡此字段所有权
   - group: ""               # core API group；Secret 的 data 由 ESO 渲染
     kind: Secret
     jsonPointers:
@@ -563,7 +563,7 @@ spec:
 
 ### 生产落地实现
 
-Drift 处置的值班级流程（与 13.3 SOP 衔接）：
+Drift 处置的值班级流程（与 12.3 SOP 衔接）：
 
 ```bash
 argocd app diff dev-demo-api          # 1.看差异：哪个资源、哪些字段
@@ -576,12 +576,12 @@ argocd app diff dev-demo-api          # 1.看差异：哪个资源、哪些字�
 argocd app get dev-demo-api --refresh  # Sync Status 回到 Synced
 ```
 
-- 数字：合法改写类（HPA/ESO）应在首次接入时就配好 ignoreDifferences——事后补配意味着中间所有对账都在误报；死循环判定目标 ≤10 分钟（对齐 13.3 P2 响应）。
+- 数字：合法改写类（HPA/ESO）应在首次接入时就配好 ignoreDifferences——事后补配意味着中间所有对账都在误报；死循环判定目标 ≤10 分钟（对齐 12.3 P2 响应）。
 - 云服务映射：Drift 现场在 ACK（对照 EKS）；Secret 的 owner 是 ESO + KMS/凭据管家（附录 A.3）。
 
 ### 典型故障案例
 
-10.2 案例的后续：该团队理解所有权后，把 `Deployment.spec.replicas` 让渡给 HPA（ignoreDifferences），Git 里副本字段仅作初始值注释——从此 HPA 弹性不再与 Git 打架，OutOfSync 告警归零。同一时期另一团队用 ignoreDifferences 掩盖了一次真实的人为误改（字段无人认领），三天后事故复盘才发现——**让渡与掩盖的区别就在"有没有说清 owner"**。
+9.2 案例的后续：该团队理解所有权后，把 `Deployment.spec.replicas` 让渡给 HPA（ignoreDifferences），Git 里副本字段仅作初始值注释——从此 HPA 弹性不再与 Git 打架，OutOfSync 告警归零。同一时期另一团队用 ignoreDifferences 掩盖了一次真实的人为误改（字段无人认领），三天后事故复盘才发现——**让渡与掩盖的区别就在"有没有说清 owner"**。
 
 点评：**Ownership Boundary 是声明式系统的成人礼**——从"Git 管一切"的幻想，到"Git 管它管得住的"的工程现实主义。
 
@@ -597,7 +597,7 @@ argocd app get dev-demo-api --refresh  # Sync Status 回到 Synced
 
 ### 自动化/自治闭环
 
-本节为交付自治划出**精确边界**：selfHeal 只在"Git 真拥有该字段"时才安全——所有权模型是自治系统不误伤合法变更的前提（16 章 L2 自动处置同样遵守此模型）。
+本节为交付自治划出**精确边界**：selfHeal 只在"Git 真拥有该字段"时才安全——所有权模型是自治系统不误伤合法变更的前提（15 章 L2 自动处置同样遵守此模型）。
 
 ### 生产检查清单
 
@@ -609,7 +609,7 @@ argocd app get dev-demo-api --refresh  # Sync Status 回到 Synced
 
 ---
 
-## 10.6 可复现交付：Release Identity、Immutable Artifact、回滚与晋升
+## 9.6 可复现交付：Release Identity、Immutable Artifact、回滚与晋升
 
 ### 生产问题
 
@@ -660,7 +660,7 @@ Release Identity 缺了一元 → 历史版本无法回放
 回滚 = 重建旧镜像（最慢最险的路），复现 = 玄学
 ```
 
-权衡的核心：**可复现不是"记性好"，是 Release Identity 五元组的结构性保证**——这也是 11 章灰度能"精确对比新旧版本"的前提。
+权衡的核心：**可复现不是"记性好"，是 Release Identity 五元组的结构性保证**——这也是 10 章灰度能"精确对比新旧版本"的前提。
 
 ### 最小可行方案
 
@@ -675,23 +675,23 @@ Release Identity 缺了一元 → 历史版本无法回放
 ```bash
 # 常规通道：revert 即回滚（dev/staging 自动同步，端到端 <2 分钟）
 git log --oneline -5 -- envs/prod/demo-api/            # 定位引入变更的 commit（可追溯）
-git revert <commit-hash> && git push                    # 走 MR：生产路径双审批（10.8）
+git revert <commit-hash> && git push                    # 走 MR：生产路径双审批（9.8）
 argocd app get prod-demo-api --hard-refresh             # 立即拉 Git，不等 3 分钟对账周期
-argocd app sync prod-demo-api                           # 生产手动同步（syncPolicy 边界见 10.4）
+argocd app sync prod-demo-api                           # 生产手动同步（syncPolicy 边界见 9.4）
 
-# 应急通道（P0/P1 止损，与 13.3 应急 SOP 同一命令）：
+# 应急通道（P0/P1 止损，与 12.3 应急 SOP 同一命令）：
 argocd app history prod-demo-api                        # 秒查：当前版本与历史版本清单（Release Identity 的应用体现）
-argocd app rollback prod-demo-api 12                    # 回到 revision 12；前提 auto-sync 已停（10.9 纪律）
+argocd app rollback prod-demo-api 12                    # 回到 revision 12；前提 auto-sync 已停（9.9 纪律）
 ```
 
 - 回滚零重建的原理：镜像与 chart 制品都躺在 ACR（不可变）——回滚只是把引用指回去，不重新构建。
 - 可追溯的两条线：Git commit 历史（谁改的）+ ArgoCD operation 历史（同步/回滚执行记录），互为佐证。
 
-**② 晋升（Promotion）= 目录间复制 MR**：dev 验证通过后，把目录值复制到 staging/prod 同路径提交 MR——晋升路径可见、可 diff、可审批（完整目录结构与 CODEOWNERS 见 10.8）。晋升的不是"镜像"（制品已不可变），而是**"环境的引用"**（哪份 values 指向哪个版本）。
+**② 晋升（Promotion）= 目录间复制 MR**：dev 验证通过后，把目录值复制到 staging/prod 同路径提交 MR——晋升路径可见、可 diff、可审批（完整目录结构与 CODEOWNERS 见 9.8）。晋升的不是"镜像"（制品已不可变），而是**"环境的引用"**（哪份 values 指向哪个版本）。
 
-**③ 回滚速度的数字底座**：给 ACR 企业版实例（对照 ECR）配 tag 保留策略：保留最近 100 个、自动回收更旧的（`# 可调:` 生产建议 ≥50）。目标数字：**dev/staging 回滚端到端 <2 分钟；prod（双审批 + 手动 sync）≤5 分钟**（对齐 13.3 止损目标）。
+**③ 回滚速度的数字底座**：给 ACR 企业版实例（对照 ECR）配 tag 保留策略：保留最近 100 个、自动回收更旧的（`# 可调:` 生产建议 ≥50）。目标数字：**dev/staging 回滚端到端 <2 分钟；prod（双审批 + 手动 sync）≤5 分钟**（对齐 12.3 止损目标）。
 
-云服务映射：制品长存 ACR（OCI：镜像 + chart 同库）；回滚通道 = ACK 上的 ArgoCD；灰度晋升由 Argo Rollouts 承接（第 11 章）。
+云服务映射：制品长存 ACR（OCI：镜像 + chart 同库）；回滚通道 = ACK 上的 ArgoCD；灰度晋升由 Argo Rollouts 承接（第 10 章）。
 
 ### 典型故障案例
 
@@ -711,7 +711,7 @@ argocd app rollback prod-demo-api 12                    # 回到 revision 12；�
 
 ### 自动化/自治闭环
 
-本节为 L2 运维自治（第 16 章）的"自动回滚"提供了原子操作：revert/rollback 是可被自动化系统安全调用的低风险动作——前提正是 Release Identity 提供的可追溯与可复现；11 章的灰度分析同样依赖"新旧版本身份精确可比"。
+本节为 L2 运维自治（第 15 章）的"自动回滚"提供了原子操作：revert/rollback 是可被自动化系统安全调用的低风险动作——前提正是 Release Identity 提供的可追溯与可复现；10 章的灰度分析同样依赖"新旧版本身份精确可比"。
 
 ### 生产检查清单
 
@@ -723,7 +723,7 @@ argocd app rollback prod-demo-api 12                    # 回到 revision 12；�
 
 ---
 
-## 10.7 ArgoCD高可用架构：组件职责、扩缩与渲染瓶颈
+## 9.7 ArgoCD高可用架构：组件职责、扩缩与渲染瓶颈
 
 ### 生产问题
 
@@ -757,7 +757,7 @@ Git / Helm（ACR OCI）
    └── Redis：缓存（加速比较，不是事实来源——缓存丢失 = 重新渲染，不丢状态）
 ```
 
-四个组件各自的存在理由：**api-server** 因为人和 CI 需要入口；**repo-server** 因为 Render 是 CPU 密集的独立工作（10.3）；**controller** 因为对账循环必须常驻；**Redis** 因为 Live Manifest 的缓存能让 Diff 不必每次都打 K8s API。
+四个组件各自的存在理由：**api-server** 因为人和 CI 需要入口；**repo-server** 因为 Render 是 CPU 密集的独立工作（9.3）；**controller** 因为对账循环必须常驻；**Redis** 因为 Live Manifest 的缓存能让 Diff 不必每次都打 K8s API。
 
 **② 渲染瓶颈的推导链（本节核心工程知识）**：
 
@@ -783,7 +783,7 @@ Reconciliation 延迟上升（对账变慢 = 变更可见变慢 = 漂移发现�
 
 1. **核心组件多副本**：server/repoServer/controller/applicationSet 各 ≥2 副本 + Redis HA；chart 版本锁定安装。
 2. **容量跟着规模走**：Application >100 扩 repo-server；对账周期按"变更可见时延 vs API 压力"权衡。
-3. **状态可观测**：OutOfSync/Failed 接告警（第 12 章）+ 同步失败进值班群（10.8）。
+3. **状态可观测**：OutOfSync/Failed 接告警（第 11 章）+ 同步失败进值班群（9.8）。
 
 ### 生产落地实现
 
@@ -798,7 +798,7 @@ helm install argocd argo/argo-cd \
   --version <chart-version> \
   --values argocd-ha-values.yaml        # 可调: chart-version 锁定具体版本（禁 latest），以官方 argo-helm 发布为准
 
-# 初始 admin 口令（首次登录即改，日常走 SSO，见 10.8）
+# 初始 admin 口令（首次登录即改，日常走 SSO，见 9.8）
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
 ```
 
@@ -848,7 +848,7 @@ kubectl -n argocd edit configmap argocd-ssh-known-hosts-cm
 
 **④ ACR 镜像免密（一句）**：业务镜像来自 ACR 企业版（对照 ECR），ACK 的免密组件用节点 RAM 角色/RRSA 自动注入拉取凭据（4.2 云身份纪律在镜像侧的延伸）——ArgoCD 同步的清单里不出现 imagePullSecrets，交付链路全程无镜像凭据。
 
-数字小结：HA 后单组件故障 leader 切换 <30 秒无感；交付通道可用性目标 99.9% = 月停摆预算 43 分钟（口径同 13.2）；对账周期默认 3 分钟，Application >100 时优先观察 repo-server CPU。云服务映射：ArgoCD on ACK（对照 EKS）、Git 凭据 = Codeup PAT、镜像 = ACR 免密。
+数字小结：HA 后单组件故障 leader 切换 <30 秒无感；交付通道可用性目标 99.9% = 月停摆预算 43 分钟（口径同 12.2）；对账周期默认 3 分钟，Application >100 时优先观察 repo-server CPU。云服务映射：ArgoCD on ACK（对照 EKS）、Git 凭据 = Codeup PAT、镜像 = ACR 免密。
 
 ### 典型故障案例
 
@@ -862,13 +862,13 @@ kubectl -n argocd edit configmap argocd-ssh-known-hosts-cm
 
 ### 长效治理方案
 
-- ArgoCD HA（四组件 ≥2 副本 + Redis HA）+ 版本锁定 + 同步状态告警（第 12 章）。
+- ArgoCD HA（四组件 ≥2 副本 + Redis HA）+ 版本锁定 + 同步状态告警（第 11 章）。
 - 规模巡检：Application 数 × 对账周期 → repo-server 容量预估，扩容先于饱和。
 - 对账周期是"可见性 vs 压力"的权衡项，调整要有数据支撑。
 
 ### 自动化/自治闭环
 
-本节是交付层机械自治的**执行可靠性**：10.2 的对账循环依赖 controller/repo-server 持续运转——中枢高可用与容量充足，是交付自治的底座。
+本节是交付层机械自治的**执行可靠性**：9.2 的对账循环依赖 controller/repo-server 持续运转——中枢高可用与容量充足，是交付自治的底座。
 
 ### 生产检查清单
 
@@ -881,7 +881,7 @@ kubectl -n argocd edit configmap argocd-ssh-known-hosts-cm
 
 ---
 
-## 10.8 企业GitOps治理模型：Git、ArgoCD、Kubernetes三层权限与晋升治理
+## 9.8 企业GitOps治理模型：Git、ArgoCD、Kubernetes三层权限与晋升治理
 
 ### 生产问题
 
@@ -927,7 +927,7 @@ Kubernetes RBAC
 
 1. **目录即环境**：chart-root 单 main 分支，`envs/{dev,staging,prod}/` 目录隔离。
 2. **prod 双审批**：CODEOWNERS 平台组 + SRE 组，缺一不可合并。
-3. **三层各归其位**：Git 定"谁能改声明"，ArgoCD RBAC 定"谁能触发同步"（业务只读 + dev 可 sync），K8s 收敛只读（应急走 13.3 白名单）。
+3. **三层各归其位**：Git 定"谁能改声明"，ArgoCD RBAC 定"谁能触发同步"（业务只读 + dev 可 sync），K8s 收敛只读（应急走 12.3 白名单）。
 4. **新服务自助接入**：ApplicationSet 目录生成器，提交目录即生成 Application。
 
 ### 生产落地实现
@@ -944,7 +944,7 @@ chart-root/                             # 编排仓库：只放 values 与 Appli
     ├── dev/
     │   ├── demo-api/
     │   │   ├── values.yaml             # 环境基线：副本/资源/域名（业务组可改）
-    │   │   └── values-overrides.yaml   # 覆盖层：镜像 tag——CI 只改这一个文件（10.1）
+    │   │   └── values-overrides.yaml   # 覆盖层：镜像 tag——CI 只改这一个文件（9.1）
     │   └── user-svc/
     ├── staging/                        # 与 dev 同构（每服务同两文件结构）
     └── prod/                           # CODEOWNERS 双审批目录（下 ④）
@@ -991,7 +991,7 @@ spec:
       directories:
       - path: envs/dev/*             # dev/staging 进自动生成器
       - path: envs/staging/*
-      # prod 不进自动生成器：生产 Application 用 10.4 模板手动建档（去 automated），双审批入口在 Git MR
+      # prod 不进自动生成器：生产 Application 用 9.4 模板手动建档（去 automated），双审批入口在 Git MR
   template:
     metadata:
       name: '{{path[0]}}-{{path[1]}}'        # 如 dev-demo-api（label env 按需补充）
@@ -1012,7 +1012,7 @@ spec:
         server: https://kubernetes.default.svc
         namespace: '{{path[0]}}'
       syncPolicy:
-        automated:                    # 风险: 仅 dev/staging 生成器适用；生产的自动化边界见 10.4
+        automated:                    # 风险: 仅 dev/staging 生成器适用；生产的自动化边界见 9.4
           prune: false
           selfHeal: true
 ```
@@ -1023,7 +1023,7 @@ spec:
 <!-- chart-root/.pull_request_template.md（云效 Codeup 用同字段的合并请求模板） -->
 变更类型（勾选）: [ ] 镜像版本升级  [ ] 配置变更（副本/资源/域名/环境变量）  [ ] 新服务接入（新增 envs/<env>/<svc>/ 目录）
 影响面: 环境 dev/staging/prod；服务与实例数（如 prod/demo-api ×6）；是否涉及不可逆操作（删资源/prune/降配）
-回滚方案: revert 本 MR 即回滚（无 DB 变更）；或 argocd app rollback（13.3 应急通道，须先停 auto-sync）
+回滚方案: revert 本 MR 即回滚（无 DB 变更）；或 argocd app rollback（12.3 应急通道，须先停 auto-sync）
 ```
 
 ```text
@@ -1044,11 +1044,11 @@ p, role:service-team, applications, get, */*, allow        # 业务组：全部�
 p, role:service-team, applications, sync, dev-*, allow     # 仅 dev 应用允许手动重新同步
 p, role:platform-admin, applications, *, */*, allow        # 平台组：应用全动作
 p, role:platform-admin, projects, *, *, allow              # 平台组：项目管理
-p, role:platform-admin, repositories, *, *, allow          # 平台组：仓库凭据管理（10.7 的 Secret）
+p, role:platform-admin, repositories, *, *, allow          # 平台组：仓库凭据管理（9.7 的 Secret）
 g, service-team, role:service-team                         # 组名来自 SSO 组声明（下一句）
 ```
 
-SSO 一句：登录走 OIDC/Dex 对接企业身份源（阿里云 IDaaS；对照 AWS IAM Identity Center），组声明映射上面 `g,` 行——多租户 project 体系深度归 V2。第三层（K8s RBAC）：业务组的 K8s 权限收敛为命名空间只读，直改集群只留 13.3 应急白名单——三层模型闭环。
+SSO 一句：登录走 OIDC/Dex 对接企业身份源（阿里云 IDaaS；对照 AWS IAM Identity Center），组声明映射上面 `g,` 行——多租户 project 体系深度归 V2。第三层（K8s RBAC）：业务组的 K8s 权限收敛为命名空间只读，直改集群只留 12.3 应急白名单——三层模型闭环。
 
 **⑥ 同步失败通知通道（审批后的兜底观测）**：
 
@@ -1070,7 +1070,7 @@ data:
     webhook:
       dingtalk:
         method: POST
-        body: '{"msgtype": "text", "text": {"content": "[ArgoCD] {{app.metadata.name}} 同步失败，处理见 10.9"}}'
+        body: '{"msgtype": "text", "text": {"content": "[ArgoCD] {{app.metadata.name}} 同步失败，处理见 9.9"}}'
   subscriptions: |
     - recipients: [dingtalk]
       triggers: [on-sync-failed, on-health-degraded]   # 内置触发器：同步失败 / 健康劣化
@@ -1092,7 +1092,7 @@ data:
 
 - 三层权限模型（Git CODEOWNERS / ArgoCD RBAC / K8s 只读收敛）进安全评审清单。
 - 目录即环境 + 晋升即复制 + prod 双审批 + PR 模板三字段。
-- 可逆全自动、不可逆人工闸门（与 16 章自治护栏同哲学）。
+- 可逆全自动、不可逆人工闸门（与 15 章自治护栏同哲学）。
 
 ### 自动化/自治闭环
 
@@ -1109,7 +1109,7 @@ data:
 
 ---
 
-## 10.9 生产故障诊断：ArgoCD状态模型与Reconciliation排障
+## 9.9 生产故障诊断：ArgoCD状态模型与Reconciliation排障
 
 ### 生产问题
 
@@ -1117,14 +1117,14 @@ data:
 
 ### 传统方案失效原因
 
-- 见黄灯就 sync（10.5 已治：先分型）。
+- 见黄灯就 sync（9.5 已治：先分型）。
 - 无状态机：不知道 Sync Status 和 Health 是两个独立维度、不知道 Render 失败和 Live 漂移的排查方向完全不同。
 - secret 明文进 Git + 异常无排查路径：违反安全基线（附录 A.3）。
 - 失效根因：**把排障当命令记忆，不当状态机遍历**。
 
 ### 架构约束与权衡
 
-**① ArgoCD 故障诊断状态机（本节核心制品——把 10.2/10.3/10.5 的知识合成一张诊断图）**：
+**① ArgoCD 故障诊断状态机（本节核心制品——把 9.2/9.3/9.5 的知识合成一张诊断图）**：
 
 ```text
 Application
@@ -1139,9 +1139,9 @@ Sync Status ── Synced ──────────────────
      │                                  │
      ├── 差异来自 Git 新变更 → 正常路径：sync（dev 自动/生产 CI 门禁 + 人工）
      │
-     ├── Render 问题（渲染结果非预期）→ 查 chart/values 优先级与版本（10.3/10.4）
+     ├── Render 问题（渲染结果非预期）→ 查 chart/values 优先级与版本（9.3/9.4）
      │
-     └── Live Drift（集群侧被改）→ 谁改的？（10.5 六类分型）
+     └── Live Drift（集群侧被改）→ 谁改的？（9.5 六类分型）
               ├── 人为修改        → 回写 Git
               ├── 控制器合法改写  → ignoreDifferences（所有权让渡）
               └── secret 渲染     → ESO 接管 Secret.data
@@ -1171,7 +1171,7 @@ argocd app diff dev-demo-api                 # 2.精确 diff：Git 期望 vs 集
 argocd app get dev-demo-api --hard-refresh   # 3.绕过缓存重拉 Git（对账周期 3m + 仓库缓存都会延迟真相）
 argocd app diff dev-demo-api --refresh       # 4.刷新后再 diff：确认差异真实存在（排除缓存假象）
 argocd app sync dev-demo-api --dry-run       # 5.只渲染不落集群：验证 Helm 渲染与 RBAC 权限，零变更
-argocd app sync dev-demo-api --prune         # 6.确认后执行（生产在 CI 门禁后人工触发，10.4）
+argocd app sync dev-demo-api --prune         # 6.确认后执行（生产在 CI 门禁后人工触发，9.4）
 ```
 
 **③ 健康状态判定表（Health → 去向）**：
@@ -1180,8 +1180,8 @@ argocd app sync dev-demo-api --prune         # 6.确认后执行（生产在 CI 
 |---|---|---|
 | **Healthy** | 实际 = 期望且资源健康 | 正常，无需动作 |
 | **Progressing** | 滚动/等待中 | 超 10 分钟未转 Healthy（`# 可调:` 按应用滚动时长定）→ 查探针与镜像拉取（下） |
-| **Degraded** | 资源报告不健康 | events/logs 定位；业务受损直接走 13.3 SOP |
-| **Suspended** | Rollout/分析暂停 | 查 AnalysisRun，第 11 章灰度 |
+| **Degraded** | 资源报告不健康 | events/logs 定位；业务受损直接走 12.3 SOP |
+| **Suspended** | Rollout/分析暂停 | 查 AnalysisRun，第 10 章灰度 |
 | **Missing** | 集群缺资源 | 同步未建出：查 CRD/配额/RBAC（下 ④） |
 | **Unknown** | 该类资源无健康规则 | 为 CRD 配自定义 health check（Lua，以官方文档为准） |
 
@@ -1189,7 +1189,7 @@ argocd app sync dev-demo-api --prune         # 6.确认后执行（生产在 CI 
 
 ```bash
 kubectl -n dev describe pod -l app=demo-api | grep -A5 Events
-# ImagePullBackOff → 两问：tag 在 ACR 是否存在（10.1 推送是否成功）？免密组件是否正常（4.2，RRSA/节点角色）？
+# ImagePullBackOff → 两问：tag 在 ACR 是否存在（9.1 推送是否成功）？免密组件是否正常（4.2，RRSA/节点角色）？
 ```
 
 **④ 同步卡在 Init/Syncing（CRD 未就绪）**：operation 长时间 running、资源停在等待——常见于 app-of-apps 或新 Operator 接入：目标资源的 CRD 由前序应用安装，时序没保证。
@@ -1201,12 +1201,12 @@ argocd app get <app>                     # 看 operationState.phase 与 message
 
 治本：给 CRD 清单加注解 `argocd.argoproj.io/sync-wave: "-1"`（数字越小越先同步，默认 0），或 CRD 独立先行安装；Operator 类应用建议在 Application 上加 `retry`（如 limit 5、backoff 30s 起步）。
 
-**⑤ 应急 rollback 通道（与 13.3 SOP 完全一致的纪律）**：
+**⑤ 应急 rollback 通道（与 12.3 SOP 完全一致的纪律）**：
 
 ```bash
 argocd app set prod-demo-api --sync-policy none   # 回滚前先停 auto-sync，否则 Git 又把新版同步回来
-argocd app history prod-demo-api                  # 秒查版本清单（10.6 Release Identity 的应用）
-argocd app rollback prod-demo-api 12              # 回到 revision 12；目标端到端 ≤5 分钟（对齐 13.3 止损目标）
+argocd app history prod-demo-api                  # 秒查版本清单（9.6 Release Identity 的应用）
+argocd app rollback prod-demo-api 12              # 回到 revision 12；目标端到端 ≤5 分钟（对齐 12.3 止损目标）
 # 止损后 2h 内回写 Git（提交等价变更或 revert），再恢复同步策略——同一份制度，两章一致
 ```
 
@@ -1215,12 +1215,12 @@ argocd app rollback prod-demo-api 12              # 回到 revision 12；目标�
 ### 最小可行方案
 
 1. **排查有序**：get（状态）→ diff（差异）→ --hard-refresh（排除缓存）→ sync --dry-run（渲染/权限验证）。
-2. **状态机分叉**：Render 问题查 Git 侧（chart/values）；Live Drift 按 10.5 六类分型处置。
-3. **应急通道纪律**：rollback 前停 auto-sync，止损后 2 小时回写 Git（与 13.3 同一制度）。
+2. **状态机分叉**：Render 问题查 Git 侧（chart/values）；Live Drift 按 9.5 六类分型处置。
+3. **应急通道纪律**：rollback 前停 auto-sync，止损后 2 小时回写 Git（与 12.3 同一制度）。
 
 ### 生产落地实现
 
-数字小结：对账周期 3 分钟（可调 60s）；Progressing 超 10 分钟视为异常；回滚命令秒级、端到端目标 ≤5 分钟；应急回写窗口 2 小时。云服务映射：镜像失败查 ACR 免密（RRSA/节点 RAM 角色，4.2）；CRD 与集群事件在 ACK 上（`kubectl` 同构，对照 EKS）；同步失败自动通知进值班群（10.8 ⑥）。
+数字小结：对账周期 3 分钟（可调 60s）；Progressing 超 10 分钟视为异常；回滚命令秒级、端到端目标 ≤5 分钟；应急回写窗口 2 小时。云服务映射：镜像失败查 ACR 免密（RRSA/节点 RAM 角色，4.2）；CRD 与集群事件在 ACK 上（`kubectl` 同构，对照 EKS）；同步失败自动通知进值班群（9.8 ⑥）。
 
 ### 典型故障案例
 
@@ -1230,17 +1230,17 @@ argocd app rollback prod-demo-api 12              # 回到 revision 12；目标�
 
 ### 根因定位
 
-拆到底，是**排障没有状态模型**——把 10.2（对账原理）、10.3（五段流水线）、10.5（Drift 分型）的知识串成状态机后，任何异常都有唯一路径。
+拆到底，是**排障没有状态模型**——把 9.2（对账原理）、9.3（五段流水线）、9.5（Drift 分型）的知识串成状态机后，任何异常都有唯一路径。
 
 ### 长效治理方案
 
 - 状态机图进值班手册；排查序列固化为脚本（get→diff→refresh→dry-run）。
-- 漂移分型处置与 ignoreDifferences 登记制度（10.5）；secret 走 ESO/KMS 禁进 Git。
-- rollback 纪律（先停 auto-sync、2h 回写）与 13.3 同源维护。
+- 漂移分型处置与 ignoreDifferences 登记制度（9.5）；secret 走 ESO/KMS 禁进 Git。
+- rollback 纪律（先停 auto-sync、2h 回写）与 12.3 同源维护。
 
 ### 自动化/自治闭环
 
-本节让交付的机械自治**在生产可靠兑现**：selfHeal 持续生效，ignoreDifferences 划清自治边界，状态机让自治异常可诊断——为第 11 章灰度治理提供可靠地基。
+本节让交付的机械自治**在生产可靠兑现**：selfHeal 持续生效，ignoreDifferences 划清自治边界，状态机让自治异常可诊断——为第 10 章灰度治理提供可靠地基。
 
 ### 生产检查清单
 
@@ -1248,12 +1248,12 @@ argocd app rollback prod-demo-api 12              # 回到 revision 12；目标�
 - [ ] 排查序列（get/diff/--hard-refresh/--dry-run）团队熟知？
 - [ ] 健康判定表可用（Progressing >10 分钟升级）、CRD 时序用 sync-wave？
 - [ ] 镜像拉取失败的两问（ACR tag 存在？免密正常？）进值班手册？
-- [ ] rollback 前停 auto-sync、2h 回写 Git（与 13.3 一致）？
+- [ ] rollback 前停 auto-sync、2h 回写 Git（与 12.3 一致）？
 - [ ] secret 零进 Git（ESO/KMS）？
 
 ---
 
-## 10.10 最终架构与生产SOP：从Git Desired State到集群Runtime
+## 9.10 最终架构与生产SOP：从Git Desired State到集群Runtime
 
 ### 生产问题
 
@@ -1273,13 +1273,13 @@ flowchart TB
     DEV[开发者提交代码] --> CI[CI 构建<br/>第 2 章供应链]
     CI -->|推镜像 + chart| REG[(ACR 制品仓库<br/>不可变制品 · 对照 ECR)]
     CI -->|改 values 的 tag 字段| CR[(chart-root<br/>编排仓库 · Git 真相源)]
-    CR --> MR{MR 评审<br/>CODEOWNERS 双审批<br/>10.8}
+    CR --> MR{MR 评审<br/>CODEOWNERS 双审批<br/>9.8}
     MR -->|合并| AS["Application / ApplicationSet<br/>Desired State 声明"]
-    AS --> ARG["ArgoCD<br/>Fetch → Render → Diff → Sync<br/>交付层控制器 · 10.2/10.3"]
+    AS --> ARG["ArgoCD<br/>Fetch → Render → Diff → Sync<br/>交付层控制器 · 9.2/9.3"]
     ARG -->|Apply Manifest| K8S["Kubernetes Controllers<br/>运行层控制器"]
     K8S --> RT[ACK 集群 Actual Runtime]
     RT -.->|Health / Live 观察| ARG
-    RT -.->|OutOfSync 告警| ALERT[值班群 · 13.1]
+    RT -.->|OutOfSync 告警| ALERT[值班群 · 12.1]
     classDef start fill:#3451b2,color:#fff,stroke:#2a4090,stroke-width:2px
     classDef proc fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a
     classDef data fill:#ccfbf1,stroke:#0d9488,color:#134e4a
@@ -1298,21 +1298,21 @@ flowchart TB
 发布 SOP：CI 改 tag → MR（dev 免 owner/staging 单审/prod 双审）→ ArgoCD 自动/手动 sync
          时限：dev ≤5 分钟端到端；prod ≤2 小时（含审批）
 
-晋升 SOP：dev 目录验证通过 → 复制到 staging/prod 同路径 → 晋升 MR（引用晋升，10.6）
+晋升 SOP：dev 目录验证通过 → 复制到 staging/prod 同路径 → 晋升 MR（引用晋升，9.6）
          时限：每段独立审批，禁止跨环境直改
 
 应急 SOP（P0/P1）：argocd app set --sync-policy none → rollback <rev>（≤5 分钟）
-         → 2h 内回写 Git → 恢复同步策略（与 13.3 同一制度）
+         → 2h 内回写 Git → 恢复同步策略（与 12.3 同一制度）
 ```
 
 **③ 第三篇知识链收拢（9→10→11 的完整推导）**：
 
 ```text
-第 9 章：如何定义 Desired State —— Terraform（集群之下）+ Helm 三层覆盖（集群之上）+ Git 真相源
+第 8 章：如何定义 Desired State —— Terraform（集群之下）+ Helm 三层覆盖（集群之上）+ Git 真相源
      ↓ 提供了"被调谐的目标"
-第 10 章：如何持续收敛到 Desired State —— ArgoCD 对账循环 + 两层控制器 + Ownership Boundary
+第 9 章：如何持续收敛到 Desired State —— ArgoCD 对账循环 + 两层控制器 + Ownership Boundary
      ↓ 提供了"从声明到运行的可靠通道"
-第 11 章：如何安全迁移到新 Desired State —— Rollouts 渐进发布 + Analysis 分析 + 自动回退
+第 10 章：如何安全迁移到新 Desired State —— Rollouts 渐进发布 + Analysis 分析 + 自动回退
      ↓ 在可靠通道之上，解决"变更瞬间的风险"
 ```
 
@@ -1345,7 +1345,7 @@ Desired State（声明期望）
 
 ### 典型故障案例
 
-用总图复盘一次完整事故：某次 prod 发布后服务 5xx 升高——按应急 SOP 3 分钟 rollback（10.9 通道）；复盘沿链路总图定位到 MR 闸门（评审未注意到镜像跨大版本）；整改在 10.8（PR 模板增加"跨大版本"必勾项）。**每个环节的问题都在它对应的知识节有解**——这是"链路完整"的真正含义。
+用总图复盘一次完整事故：某次 prod 发布后服务 5xx 升高——按应急 SOP 3 分钟 rollback（9.9 通道）；复盘沿链路总图定位到 MR 闸门（评审未注意到镜像跨大版本）；整改在 9.8（PR 模板增加"跨大版本"必勾项）。**每个环节的问题都在它对应的知识节有解**——这是"链路完整"的真正含义。
 
 点评：**总图的价值不是好看，是让每个故障都能映射到链路上的一个节点，而每个节点都有治理**。
 
@@ -1361,7 +1361,7 @@ Desired State（声明期望）
 
 ### 自动化/自治闭环
 
-本章实现了交付层的完整机械自治：**Git 变更 → 自动对账 → 自动同步 → 自动健康观察 → Drift 自动检测/纠正**，人工只保留治理闸门（审批）与应急通道——这是 L2 运维自治（16 章）在交付域的地基；第 11 章在此之上给"变更瞬间"加上风险护栏。
+本章实现了交付层的完整机械自治：**Git 变更 → 自动对账 → 自动同步 → 自动健康观察 → Drift 自动检测/纠正**，人工只保留治理闸门（审批）与应急通道——这是 L2 运维自治（15 章）在交付域的地基；第 10 章在此之上给"变更瞬间"加上风险护栏。
 
 ### 生产检查清单
 
@@ -1371,4 +1371,4 @@ Desired State（声明期望）
 - [ ] 能用八步推导链（Desired→State Store→Controller→Diff→Reconcile→Ownership→Immutable Release→Promotion）评估新交付工具？
 - [ ] 总图随架构演进季度更新？
 
-> **下一章预告**：持续收敛就绪，新版本如何安全上车——第 11 章讲灰度发布与变更风险治理：渐进发布、流量切分、观测-判断-回滚。
+> **下一章预告**：持续收敛就绪，新版本如何安全上车——第 10 章讲灰度发布与变更风险治理：渐进发布、流量切分、观测-判断-回滚。
