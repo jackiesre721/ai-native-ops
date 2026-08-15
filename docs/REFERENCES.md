@@ -18,7 +18,7 @@
 - **Kubernetes 官方文档**：<https://kubernetes.io/docs/> — 全篇底座参考。
 - **K8s Controller / Reconcile 模式**：<https://kubernetes.io/docs/concepts/architecture/controller/> — 第 5 章"期望状态→调谐→实际状态"的官方定义（L1 机械自治的来源）。
 - **OCI Image / Runtime Spec**：<https://github.com/opencontainers> — 第 2 章 OCI 规范、镜像/运行时标准。
-- **containerd 文档**：<https://containerd.io/docs/> — CRI 运行时官方文档（原第 6 章 V1.7 瘦身，作延伸深读）。
+- **containerd 文档**：<https://containerd.io/docs/> — CRI 运行时官方文档（延伸深读）。
 - **CNI Spec**：<https://www.cni.dev/> ；**CSI**：<https://kubernetes-csi.github.io/docs/> — 第 7 章网络/存储接口标准。
 - **Raft 论文《In Search of an Understandable Consensus Algorithm》**：<https://raft.github.io/raft.pdf> — 第 4 章 etcd 高可用（奇数多副本/多数派）的共识基础。
 - **K8s 调度框架**：<https://kubernetes.io/docs/concepts/scheduling-eviction/> — 第 6 章调度/亲和/污点/拓扑分布。
@@ -56,7 +56,7 @@
 - **阿里云百炼 DashScope 文档**：<https://help.aliyun.com/zh/model-studio/> — 15.4⑤ 分诊器模型 API 的主参考（兼容协议，对照 AWS Bedrock）。
 - **OpenAI Cookbook（结构化输出与评测）**：<https://cookbook.openai.com/> — JSON mode / few-shot / 评测集设计的工程实践，15.5② 评测门禁的方法参照。
 
-> AI 训练/推理负载运维方向（GPU 调度、KV Cache、推理性能等）V1.11 判定与主旨无关，已移出本书范围，本清单不再收录。
+> AI 训练/推理负载运维方向（GPU 调度、KV Cache、推理性能等）与主旨无关，已移出本书范围，本清单不再收录。
 
 ## 附录 / 全书方法论
 

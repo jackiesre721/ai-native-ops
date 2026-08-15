@@ -23,7 +23,7 @@ features:
   - title: 工程化写作模板
     details: 每小节固定 10 步：生产问题 → 失效根因 → 架构权衡 → 落地实现 → 治理 → 自治闭环。
     link: /CONVENTIONS
-  - title: 技术栈锁死
-    details: VM/Loki/Tempo/OTel/Grafana + Helm/ArgoCD/Rollouts + LLM 建议式分诊引擎，落地一致、不发散。
+  - title: 参考技术栈
+    details: VM/Loki/Tempo/OTel/Grafana + Helm/ArgoCD/Rollouts + LLM 建议式分诊引擎（参考实现，等价可替换），全书示例一致。
     link: /11-opentelemetry-observability
 ---

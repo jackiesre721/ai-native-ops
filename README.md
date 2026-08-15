@@ -12,7 +12,7 @@
 - **L2 运维自治**（第 15 章）：SRE 观测驱动闭环——业务稳定性自动化治理
 - **L3 智能自治**（15.4⑤/15.5）：Agent 引擎闭环——"AI 驱动、人审核"的智能自治落地
 
-## 结构（15 章 + 2 附录，五篇 · V1.9 主旨聚焦）
+## 结构（15 章 + 2 附录，五篇）
 
 | 篇 | 章节 | 主题 |
 |---|---|---|
@@ -23,7 +23,7 @@
 | 第五篇 平台工程与自治 | 第 14–15 章 | 平台封装 / 运维自治闭环 / Agent 引擎落地（终章） |
 | 附录 | A / B | 安全基线 / 故障闭环案例 |
 
-技术栈锁死（双层参考栈）：**基础设施层 = 云托管生态（阿里云 ACK 主参考、AWS EKS 对照，不自建 K8s）** + 平台层自建栈：VictoriaMetrics / Loki / Tempo / OpenTelemetry / Grafana + Helm / ArgoCD / Argo Rollouts + LLM API（百炼 DashScope 主参考、Bedrock 对照，建议式分诊引擎）。写作铁律见 `docs/CONVENTIONS.md`（V1.1：每节落地三件套——可运行制品/云服务映射/数字）。
+双层参考栈（推荐实现，等价组件同样适用）：**基础设施层 = 云托管生态（阿里云 ACK 主参考、AWS EKS 对照）** + 平台层自建栈：VictoriaMetrics / Loki / Tempo / OpenTelemetry / Grafana + Helm / ArgoCD / Argo Rollouts + LLM API（百炼 DashScope 主参考、Bedrock 对照，建议式分诊引擎）。写作铁律见 `docs/CONVENTIONS.md`（每节落地三件套：可运行制品/云服务映射/数字）。
 
 ## 本地预览
 
@@ -39,7 +39,7 @@ npm run docs:preview   # 预览构建产物
 ## 目录
 
 - 书稿源文件：`docs/`（`NN-*.md` 为各章，`appendix-*.md` 为附录）
-- 写作规范（V1.0 冻结规则）：[`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)
+- 写作规范（全书写作宪法）：[`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)
 - 总览与阅读路径：[`docs/README.md`](docs/README.md)
 
 ## License

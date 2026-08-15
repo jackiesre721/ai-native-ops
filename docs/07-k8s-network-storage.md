@@ -2,22 +2,20 @@
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（严控容灾边界） ｜ 状态：终审中 -->
 
 > 本章定位：讲清托管 K8s（阿里云 ACK 主参考、AWS EKS 对照）的网络、流量入口、存储生命周期与生产容灾极简规范——云 CNI（Terway/VPC-CNI）、SLB/NLB/ALB 流量网关、云盘/NAS/OSS 三种存储、云盘快照与 RPO/RTO 落地。容灾只到快照 + 指标 + 演练原则，深度 DR 归 V2。
-> **主线定位**：本章为网络与存储是负载运行的连接层——L1 自愈的服务面管道（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定（V1.4）**：业务负载与治理件的连接与供给层——对象/文件存储（OSS/NAS）、流量入口（网关）与镜像拉取管道都落在此章治理面上。 **承上启下**：承第 6 章资源与调度（补齐连接与供给面，底座篇至此收束）；启第 8 章一切即代码（底座上"跑什么、该是什么样"开始写成代码）。
-
-> **边界声明**：本章不讲自建 CNI（Flannel/Calico）与自建存储；不展开深度服务网格（Istio/Linkerd 全生态）、不展开深度 DR（跨集群/多云容灾）。以上统一归 V2。
+> **主线定位**：本章为网络与存储是负载运行的连接层——L1 自愈的服务面管道（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定**：业务负载与治理件的连接与供给层——对象/文件存储（OSS/NAS）、流量入口（网关）与镜像拉取管道都落在此章治理面上。 **承上启下**：承第 6 章资源与调度（补齐连接与供给面，底座篇至此收束）；启第 8 章一切即代码（底座上"跑什么、该是什么样"开始写成代码）。
 
 ---
 
 ## 7.1 集群基础网络通信原理、主流CNI选型与生产运维规范
-<!-- 云 CNI 视角：Terway 让 Pod 直通 VPC。运维对象不再是封装协议，而是 vSwitch IP 容量、ENI/IP 配额、安全组与 terway-eniip 组件日志四件事。 -->
+<!-- 云 CNI 视角：Terway 让 Pod 直通 VPC。运维对象是 vSwitch IP 容量、ENI/IP 配额、安全组与 terway-eniip 组件日志四件事。 -->
 
 ### 生产问题
 
-跨节点 Pod 偶发超时，团队按自建集群老手册去查 Flannel/Calico 的封装与节点路由——托管集群里根本没有它们，越排越远。**云 CNI 时代的故障换了发源地：vSwitch IP 耗尽、节点 ENI/IP 配额打满、安全组没放行对端**，表现却是最会伪装的"Pod 拿不到 IP 一直 Pending"或"跨节点不通"。
+跨节点 Pod 偶发超时，团队从节点路由与网络封装入手排查，越排越远。**云 CNI 时代的故障换了发源地：vSwitch IP 耗尽、节点 ENI/IP 配额打满、安全组没放行对端**，表现却是最会伪装的"Pod 拿不到 IP 一直 Pending"或"跨节点不通"。
 
 ### 传统方案失效原因
 
-- **自建视角错位**：背 overlay/underlay 封装原理，不会查 Terway 日志与 VPC 配额（4.2 同病）。
+- **排障入口错位**：盯节点路由与封装，不会查 Terway 日志与 VPC 配额（4.2 同病）。
 - **IPAM 无容量规划**：Pod 直通 VPC = 每 Pod 吃一个 vSwitch IP，不规划网段，扩容即耗尽；NetworkPolicy 想当然——Terway 默认未开启，策略写了不生效。
 
 定论，不再论证：**云 CNI 是要容量规划与健康观测的核心组件，不是"装上就行"的插件**。
@@ -34,17 +32,14 @@
 | **NetworkPolicy** | 支持（需显式开启） | 支持（需显式开启） |
 
 - 对照 AWS：VPC-CNI 同为 Pod 直通 VPC，Pod 密度 ≈ ENI 数 ×（单 ENI IPv4 数 − 1）+ 2（如 m5.large = 3×9+2 = 29，以实例规格文档为准）。
-- **为什么不自建 Flannel/Calico**：封包开销、节点路由与 NetworkPolicy 后端全自管，且失去 SLB 直通 Pod 等云集成——托管主栈下不采用，仅此一句（独占 ENI 模式性能最佳但密度最低，仅网络敏感场景按节点池开启）。
+- （独占 ENI 模式性能最佳但密度最低，仅网络敏感场景按节点池开启。）
 
-**云 CNI 与传统 overlay 的机制对照**（帮助自建背景读者完成认知切换——本书不部署 overlay，仅对照原理）：
+**云 CNI（Terway/VPC-CNI）的四条机制要点**：
 
-| 维度 | 云 CNI（Terway/VPC-CNI） | 传统 overlay（Flannel VXLAN 类） |
-|---|---|---|
-| IPAM 在谁手里 | VPC/vSwitch：IP 即云资源，有配额与容量概念 | CNI 自建 IP 池：节点网段自规划自维护 |
-| Pod 转发路径 | 直通 VPC：veth/ipvlan + 节点策略路由引到 ENI，无封装 | 封装隧道：VXLAN 封包解包，跨节点走 overlay 网络 |
-| 封装开销 | 无（原生 VPC 转发，云 SLB 可直通 Pod） | 每包数十字节隧道头 + 封解包 CPU 开销 |
-| 日常运维对象 | vSwitch IP 容量、ENI/IP 配额、安全组、Terway 组件健康 | 封装协议参数、节点路由表、CNI 后端自身 |
-| 网络策略 | NetworkPolicy（需显式开启）+ 安全组双层 | NetworkPolicy（依赖 CNI 后端实现） |
+- **IPAM 在云手里**：VPC/vSwitch 的 IP 即云资源，有配额与容量概念——要规划的是 vSwitch 网段容量，不是"CNI 品牌"。
+- **直通 VPC**：veth/ipvlan + 节点策略路由引到 ENI，无封装开销，云 SLB 可直通 Pod。
+- **日常运维四件事**：vSwitch IP 容量、ENI/IP 配额、安全组、Terway 组件健康。
+- **网络策略双层**：NetworkPolicy（需显式开启）+ 安全组。
 
 权衡的核心：**密度与性能二选一，多数集群选共享 ENI 多 IP；要规划的不是"CNI 品牌"，而是 vSwitch 网段容量**。
 
@@ -91,7 +86,7 @@ kubectl -n kube-system get pods -o wide | grep terway
 kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE 'error|alloc|ip'
 ```
 
-云服务映射：本节能力落在 **Terway + VPC（vSwitch/安全组）**，对照 **AWS VPC-CNI + VPC**——排障入口都是"云配额 → 组件日志"，不是自建 overlay 的节点路由表。
+云服务映射：本节能力落在 **Terway + VPC（vSwitch/安全组）**，对照 **AWS VPC-CNI + VPC**——排障入口是"云配额 → 组件日志"。
 
 ### 典型故障案例
 
@@ -101,7 +96,7 @@ kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE '
 
 ### 根因定位
 
-问题的真正发源地是**用自建 overlay 的心智运维云 CNI**——容量账本只盯"每节点 Pod 数"，没人盯"vSwitch 总 IP 池"，网络资源账缺位，耗尽只是时间问题。
+问题的真正发源地是**网络资源账缺位**——容量账本只盯"每节点 Pod 数"，没人盯"vSwitch 总 IP 池"，耗尽只是时间问题。
 
 ### 长效治理方案
 
@@ -121,7 +116,7 @@ kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE '
 
 ### 生产检查清单
 
-- [ ] 集群 CNI 为云 CNI（Terway / VPC-CNI），无自建 Flannel/Calico？
+- [ ] 集群 CNI 为云 CNI（Terway / VPC-CNI）？
 - [ ] Terway NetworkPolicy 已开启且默认拒绝策略上线（附录 A.2）？
 - [ ] vSwitch 网段按 Pod 总量规划、剩余 <20% 有告警，分层定位命令团队会用？
 - [ ] Terway 升级有节点池级灰度预案？

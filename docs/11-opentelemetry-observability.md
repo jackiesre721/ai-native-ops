@@ -1,12 +1,8 @@
 # 第11章 OpenTelemetry全域可观测体系
-<!-- 第四篇 可观测与稳定性 ｜ 常规章（技术栈永久锁死） ｜ 状态：终审中 -->
+<!-- 第四篇 可观测与稳定性 ｜ 常规章（可观测参考栈） ｜ 状态：终审中 -->
 
-> 本章定位：第四篇开篇，建立全域可观测体系，是全书可观测体系的技术栈锚点——后续所有观测环节与 15.5 上下文装配器均复用本章技术栈。全书生态为托管 K8s（阿里云 ACK 主参考、AWS EKS 对照），本栈作为自建锁死栈跑在托管集群之上；「托管可观测 vs 自建」的取舍在 11.1 用决策表一次定调。
-> **主线定位**：本章为L2 运维自治的输入——全域信号采集，风险识别的源头（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定（V1.4）**：AIOps 的信号底座——15.5 上下文装配器的四件套（告警/变更/SLO/相似工单）全部由此栈供给；没有统一可观测，L3 智能自治就是瞎子（15.5①）。 **承上启下**：承第 10 章灰度判断（观测校验的需求在此展开为全域体系——第四篇开篇）；启第 12 章告警（数据底座 → 智能告警的信号源）。
-
-> **技术栈锁死（永久不变）**：可观测栈 = VictoriaMetrics（指标）、Loki（日志）、Tempo（链路）、OpenTelemetry（采集）、Grafana（可视化）；告警链路 = vmalert + Alertmanager（与第 12 章一致）；交付 = Helm/ArgoCD。不引入 Prometheus / ELK / Jaeger 等任何替代组件。
-> **去工具化说明（原理优先）**：本章真正要讲的是**可观测的底层逻辑**——三支柱协同、trace ID 贯穿关联、低成本存储 + 统一可视化。这套逻辑与具体组件无关，换成任何等价栈同样适用；锁死 VM/Loki/Tempo 是选一个参考实例保证全书落地一致，不是判定其他栈不可用（组件对比归 V2）。
-> **边界声明**：本章只讲统一可观测栈；可观测平台化封装归第 15 章。**SLO/错误预算归第 12 章，本章只讲采集与协同。**
+> 本章定位：第四篇开篇，建立全域可观测体系，是全书可观测体系的技术栈锚点——后续所有观测环节与 15.5 上下文装配器均复用本章技术栈。全书生态为托管 K8s（阿里云 ACK 主参考、AWS EKS 对照），本栈作为全书自建参考栈跑在托管集群之上；「托管可观测 vs 自建」的取舍在 11.1 用决策表一次定调。
+> **主线定位**：本章为L2 运维自治的输入——全域信号采集，风险识别的源头（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定**：AIOps 的信号底座——15.5 上下文装配器的四件套（告警/变更/SLO/相似工单）全部由此栈供给；没有统一可观测，L3 智能自治就是瞎子（15.5①）。 **承上启下**：承第 10 章灰度判断（观测校验的需求在此展开为全域体系——第四篇开篇）；启第 12 章告警（数据底座 → 智能告警的信号源）。
 
 ---
 
@@ -27,7 +23,7 @@
 
 **先定调：云生态下「托管可观测 vs 自建栈」决策表**（本书锁自建栈跑在托管集群之上）：
 
-| 维度 | 托管（阿里云 ARMS+SLS；AWS CloudWatch/AMP/AMG/X-Ray） | 自建锁死栈（VM/Loki/Tempo/OTel/Grafana） | 取舍要点 |
+| 维度 | 托管（阿里云 ARMS+SLS；AWS CloudWatch/AMP/AMG/X-Ray） | 自建参考栈（VM/Loki/Tempo/OTel/Grafana） | 取舍要点 |
 |---|---|---|---|
 | 数据留存 | ARMS Prometheus 常见默认 15 天（可购扩展）；CloudWatch 1 分钟粒度 15 天、1 小时粒度 455 天（以产品文档为准） | 自定：指标 30d、日志 30d、链路 14d 起步（均可调） | 长留存自建占优（扩留存只加存储） |
 | 自定义分析 | 受产品查询能力约束，跨支柱关联取决于厂商实现 | PromQL/LogQL/TraceQL 全开放，trace↔log↔metric 自由打通 | 深度分析自建占优 |
@@ -36,13 +32,13 @@
 
 **再理清三支柱协同的四条底层事实**（决定"跳转"怎么做）：
 
-**事实一：指标分"生产侧"和"采集侧"，不是两个并行数据源。** 生产侧（OTel SDK、exporter）把指标造出来放进 `/metrics` 并可盖 exemplar 戳；采集规则（PodMonitor/ServiceMonitor）+ 采集器（vmagent）只是按规则去拉；存储（VM）落盘供查询。但有一个**锁死栈的硬边界必须先讲：VictoriaMetrics（含企业版）不支持 exemplar 的存储与查询**（`query_exemplars` 接口只是返回空结果的兼容层，官方明确尚未实现）。所以本书的指标→trace 通道**不走 exemplar**，走"时间窗 + 服务 + 时长"的 TraceQL 检索与 Grafana 关联跳转（事实二与 11.5 ⑤）——Prometheus 原生栈才有 exemplar 星点，这是选型时要知道的取舍。
+**事实一：指标分"生产侧"和"采集侧"，不是两个并行数据源。** 生产侧（OTel SDK、exporter）把指标造出来放进 `/metrics` 并可盖 exemplar 戳；采集规则（PodMonitor/ServiceMonitor）+ 采集器（vmagent）只是按规则去拉；存储（VM）落盘供查询。但有一个**本参考栈的硬边界必须先讲：VictoriaMetrics（含企业版）不支持 exemplar 的存储与查询**（`query_exemplars` 接口只是返回空结果的兼容层，官方明确尚未实现）。所以本书的指标→trace 通道**不走 exemplar**，走"时间窗 + 服务 + 时长"的 TraceQL 检索与 Grafana 关联跳转（事实二与 11.5 ⑤）——Prometheus 原生栈才有 exemplar 星点，这是选型时要知道的取舍。
 
 **事实二：trace 和 metric 是同一次调用的两个产物，"时间窗 + 维度"是桥。** 一次 A 调 B 被 OTel 自动埋点**同时**产出 span（进 Tempo）+ RED 指标（进 VM）；VM 无 exemplar 时，两侧靠**同一时间窗 + 同一维度（service/route）**关联：指标定位"checkout 在 10:03–10:07 错误率 8%、p99 3s"→ 去 Tempo 按 `service=checkout AND status=error AND duration>2s` 的时间窗检索，直接命中慢/错 trace（TraceQL，11.5 ⑤）。
 
 **事实三：能"串到 trace"的只有 RED 层，业务计数器与基础设施指标先串 RED 再串 trace。**
 
-| 指标类 | 例子 | 串到 trace 的通道 |
+| 指标类 | 例子 | 串到 trace 的通道 | 可否直串 |
 |---|---|---|---|
 | RED（每请求性能） | 延迟/错误率/QPS | 时间窗+维度 → Tempo TraceQL | ✓ 能（原生指标或 spanmetrics） |
 | 业务（聚合计数） | 订单数/支付额 | 时间 + RED 桥 | ✗ 不该串 |
@@ -103,8 +99,8 @@ curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
 
 ---
 
-## 11.2 全书统一可观测技术栈（永久不变）：VictoriaMetrics(指标)、Loki(日志)、Tempo(链路)、OTel(采集)、Grafana(可视化)，不引入任何替代组件
-<!-- 全书可观测技术栈锚点·永久锁死 -->
+## 11.2 全书统一可观测技术栈：VictoriaMetrics(指标)、Loki(日志)、Tempo(链路)、OTel(采集)、Grafana(可视化)（参考实现，等价组件同样适用）
+<!-- 全书可观测技术栈锚点·参考实现 -->
 
 ### 生产问题
 
@@ -119,7 +115,7 @@ curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
 
 ### 架构约束与权衡
 
-全书统一可观测栈（永久锁死）：
+全书统一可观测参考栈：
 
 | 组件 | 角色 | 选型理由（权衡） |
 |---|---|---|
@@ -129,7 +125,7 @@ curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
 | **OpenTelemetry** | 采集 | 厂商中立标准，三支柱统一采集 |
 | **Grafana** | 可视化 | 统一面板，三数据源原生关联 |
 
-规模分界：**vmsingle 单副本扛 300–500 万活跃序列**（11.3 红线）；超限换 vmcluster（vminsert/vmselect/vmstorage 分离），写入端点变为 `http://vminsert:8480/insert/0/prometheus/api/v1/write`、查询走 `vmselect:8481/select/0/prometheus`（集群版必须带租户路径前缀，缺了 404，以官方文档为准）。权衡的核心：**这套栈以"低成本 + 高协同 + 标准化"为选型核心**，本书永久锁死，不引入替代组件。
+规模分界：**vmsingle 单副本扛 300–500 万活跃序列**（11.3 红线）；超限换 vmcluster（vminsert/vmselect/vmstorage 分离），写入端点变为 `http://vminsert:8480/insert/0/prometheus/api/v1/write`、查询走 `vmselect:8481/select/0/prometheus`（集群版必须带租户路径前缀，缺了 404，以官方文档为准）。权衡的核心：**这套栈以"低成本 + 高协同 + 标准化"为选型核心**，全书以这套栈为参考实现保持示例一致，等价组件同样适用。
 
 ### 最小可行方案
 
@@ -187,7 +183,7 @@ grafana:
 
 ### 长效治理方案
 
-- 永久锁死五件套，不引入替代组件（Prometheus/ELK/Jaeger 等）；单机到集群只换拓扑不改栈（vmsingle → vmcluster，11.3 红线切换）。
+- 全书统一用这五件套保持示例一致（等价组件同样适用）；单机到集群只换拓扑不改栈（vmsingle → vmcluster，11.3 红线切换）。
 - 告警规则统一以 VMRule 交付，vmalert+Alertmanager 承载（与 12 章一致）；栈自身用 Helm/ArgoCD 声明式交付。
 
 ### 自动化/自治闭环
