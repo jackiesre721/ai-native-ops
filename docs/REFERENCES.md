@@ -51,6 +51,7 @@
 
 ## 第六篇 · AI 原生运维（第 17–18 章，全书差异化王牌）
 
+- **《How to Scale Your Model》（JAX 团队 Scaling Book）**：<https://jax-ml.github.io/scaling-book/index> — **第 17/18 章核心深读**：大规模模型的数据并行 / 全分片数据并行（FSDP）/ 张量并行 / 流水线并行的原理与取舍，显存切账、混合精度、性能剖析与 checkpointing。与 18.3 显存拆账/容量模型同源；也是本书 V2"多卡张量并行与 gang 调度"方向的预读材料——Google 团队把"算力换算力效率"讲得最系统的一本。
 - **Modular《AI Engineering Handbook》**：<https://handbook.modular.com/> — **第 17/18 章核心深读**：LLM 推理生命周期、TTFT/goodput 等 SLO 指标、GPU 架构与显存、KV cache 估算、continuous batching / prefix caching、调度器可视化。与 18.2/18.3 性能与容量模型高度互补。
 - **vLLM + PagedAttention 论文《Efficient Memory Management for Large Language Model Serving with PagedAttention》**：<https://arxiv.org/abs/2309.06180> — 第 18.2 节 KV Cache / 分页内存管理的论文源头。
 - **Orca 论文《Orca: A Distributed Serving System for Transformer-Based Generative Models》(OSDI 2022)**：<https://www.usenix.org/conference/osdi22/presentation/yu> — 第 18.2 节 Continuous Batching（迭代级调度）的提出者。
@@ -58,6 +59,8 @@
 - **《Attention Is All You Need》(arXiv 1706.03762)**：<https://arxiv.org/abs/1706.03762> — KV Cache / Attention 的算法基础（本书只引用，不展开算法）。
 - **NVIDIA GPU Operator**：<https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/> — 第 17 章 GPU 设备插件 / 算力接入。
 - **MLPerf Inference**：<https://mlcommons.org/benchmarks/inference-datacenter/> — 第 18 章推理性能/吞吐的行业基准参照。
+- **阿里云 STAROps（全域智能运维平台）**：<https://help.aliyun.com/zh/starops/product-overview/> — 运维 Agent 的托管实例：自然语言诊断 / RCA / 数字员工编排，16.4 / 18.9"L3 承载形态"的商业印证。
+- **AWS DevOps Agent**：<https://aws.amazon.com/devops-agent/> — 自主 SRE Agent（2026 年 GA）：24/7 自主 triage + RCA + 处置建议（建议式而非全自主执行），18.9 的托管对照。
 
 ## 附录 / 全书方法论
 
