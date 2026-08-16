@@ -1,8 +1,8 @@
 # 第6章 Kubernetes资源与精细化调度治理
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（原生弹性痛点·与第15章 KEDA 严格解耦） ｜ 状态：终审中 -->
 
-> 本章定位：聚焦 K8s 原生调度与弹性痛点。6.5 小节直击「CPU 指标正常但业务请求排队、负载异常」核心问题，并与第 15 章 KEDA 分层解耦（本章讲原生缺陷，第 15 章讲平台补齐）。落地环境为托管 K8s——ACK 主参考（EKS 对照），节点 = ECS 节点池（4.2），调度与配额约束全部落到节点池标签、污点、多可用区与团队 namespace 上。
-> **主线定位**：本章为调度与资源是 L1 收敛的物理落点——副本、驱逐与弹性都在此兑现（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定**：AI 原生运维的第一道原生短板在此暴露——HPA 不懂业务信号（15.3 KEDA 收口）；主旨的演进正从原生短板起步。 **承上启下**：承第 4–5 章（底座与调谐闭环既立，期望状态靠资源与调度兑现）；启第 7 章网络与存储（补齐连接与供给面）——原生弹性短板由 15.3 KEDA 远期收口。
+> 本章定位：聚焦 K8s 原生调度与弹性痛点——6.5 直击「CPU 指标正常但业务请求排队、负载异常」的核心问题，与第 15 章 KEDA 分层解耦（本章讲原生缺陷，第 15 章讲平台补齐）。落地环境为托管 K8s（ACK 主参考、EKS 对照），调度与配额约束全部落到节点池标签、污点、多可用区与团队 namespace 上。
+> **主线定位**：调度与资源是 L1 收敛的物理落点——副本、驱逐与弹性都在此兑现；HPA 不懂业务信号这一原生短板，由 15.3 KEDA 收口。**承上启下**：承第 4–5 章（底座与调谐闭环既立，期望状态靠资源与调度兑现）；启第 7 章网络与存储（补齐连接与供给面）。
 
 ---
 
@@ -330,6 +330,45 @@ spec:
 | **podAntiAffinity** | 副本互斥不扎堆 | required 在大集群调度开销大，生产常用 preferred |
 | **topologySpreadConstraints** | 跨拓扑域均匀分布（maxSkew 精准控制） | DoNotSchedule 严格但易 Pending；ScheduleAnyway 降级保调度 |
 
+四种约束在调度器流水线里各就各位——预选一票否决，优选比优劣，绑定落节点：
+
+```mermaid
+flowchart TB
+    P["Pod 规格<br/>affinity / tolerations / topologySpread"] --> F
+
+    subgraph F["① 预选 Filter · 一票否决"]
+        direction LR
+        F1["资源够不够<br/>requests ≤ 可分配"] --> F2["污点忍不容<br/>未容忍直接出局"] --> F3["硬亲和约束<br/>nodeAffinity required"]
+    end
+
+    F -->|全部通过| S
+
+    subgraph S["② 优选 Score · 软约束比优劣"]
+        direction LR
+        S1["软亲和/反亲和<br/>preferred 打分"] --> S2["拓扑打散<br/>maxSkew 越小分越高"] --> S3["资源碎片最少"]
+    end
+
+    F -->|任一否决| PEND["Pending<br/>按 4.3 判定表定位约束名"]
+    S --> B["③ 绑定 Bind<br/>写回 pod.spec.nodeName"]
+    B --> N
+
+    subgraph N["跨 AZ 节点池 · 4.2 建好的故障域"]
+        direction LR
+        N1["AZ-h<br/>通用池"] --- N2["AZ-i<br/>通用池"] --- N3["AZ-j<br/>高配池<br/>dedicated=perf"]
+    end
+
+    classDef pod fill:#fef9c3,stroke:#ca8a04,color:#713f12,stroke-width:2px
+    classDef flt fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
+    classDef ok fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+    classDef bad fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
+    classDef pool fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    class P pod
+    class F1,F2,F3,S1,S2,S3 flt
+    class B ok
+    class PEND bad
+    class N1,N2,N3 pool
+```
+
 权衡的核心：**用调度约束换高可用与成本正确**——约束越多越难调度（资源碎片），但故障域分散越好、专用池越干净；生产按"区维度硬约束、节点维度软约束"分级。
 
 ### 最小可行方案
@@ -611,6 +650,26 @@ dev 环境一个失控容器（未设 limit）把 8C 节点 CPU 拉满，同节�
 ### 架构约束与权衡
 
 先写清 HPA 的决策公式（理解一切痛点的基础）：**期望副本 = ceil(当前副本数 × 当前指标值 ÷ 目标值)**，指标落在目标 ±10% 容忍区内则不动作。
+
+决策公式跑在一条「采集 → 重估 → 变更副本」的闭环上，而信号错配发生在闭环入口——它只看得见 CPU：
+
+```mermaid
+flowchart TB
+    REAL["真实负载<br/>队列积压 ↑ · 请求超时 ↑"] -.->|"CPU 稳在 38%，入口失真"| M
+    M["metrics-server<br/>只供 CPU/内存 · 60s 粒度"] -->|"每 15s 重估"| H["HPA 控制器<br/>期望副本 = ceil(副本 × 指标 ÷ 目标)<br/>±10% 容忍区内不动作"]
+    H -->|"扩容：0 稳定窗，出手即快"| R["副本数变化<br/>新 Pod 过探针 30–90s 才接流量"]
+    H -->|"缩容：300s 稳定窗取最大"| R
+    R -->|"CPU 利用率变化"| M
+
+    classDef bad fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
+    classDef sig fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
+    classDef ctrl fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+    classDef act fill:#fef9c3,stroke:#ca8a04,color:#713f12,stroke-width:2px
+    class REAL bad
+    class M sig
+    class H ctrl
+    class R act
+```
 
 揭晓思想实验的答案：③。CPU 利用率从来不是负载本身，只是负载的**代理指标**——HPA 用"CPU 忙不忙"去猜"业务忙不忙"，而这个代理在三种负载下会系统性失真：**(a) IO/锁等待型**——线程全挂在等数据库/等锁上（user-svc 跑重查询时的形态），CPU 空转，负载再重利用率也不涨；**(b) 请求排队型**——消费者在等队列消息，CPU 很低而积压一路恶化（开篇的 demo-api）；**(c) 长连接密集型**——im-gateway 的瓶颈在连接数与内存，CPU 大部分时间"不忙"，连接打满也不会触发扩容。这不是 HPA 的 bug，是代理指标的边界。
 

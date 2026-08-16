@@ -1,8 +1,8 @@
 # 第7章 Kubernetes网络、存储与服务治理
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（严控容灾边界） ｜ 状态：终审中 -->
 
-> 本章定位：讲清托管 K8s（阿里云 ACK 主参考、AWS EKS 对照）的网络、流量入口、存储生命周期与生产容灾极简规范——云 CNI（Terway/VPC-CNI）、SLB/NLB/ALB 流量网关、云盘/NAS/OSS 三种存储、云盘快照与 RPO/RTO 落地。容灾只到快照 + 指标 + 演练原则，深度 DR 归 V2。
-> **主线定位**：本章为网络与存储是负载运行的连接层——L1 自愈的服务面管道（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定**：业务负载与治理件的连接与供给层——对象/文件存储（OSS/NAS）、流量入口（网关）与镜像拉取管道都落在此章治理面上。 **承上启下**：承第 6 章资源与调度（补齐连接与供给面，底座篇至此收束）；启第 8 章一切即代码（底座上"跑什么、该是什么样"开始写成代码）。
+> 本章定位：讲清托管 K8s（阿里云 ACK 主参考、AWS EKS 对照）的网络、流量入口、存储生命周期与生产容灾极简规范——云 CNI（Terway/VPC CNI）、SLB/NLB/ALB 流量网关、云盘/NAS/OSS 三种存储、云盘快照与 RPO/RTO 落地。容灾只到快照 + 指标 + 演练原则，深度容灾归 V2。
+> **主线定位**：网络与存储是负载运行的连接层——L1 自愈的服务面管道；流量入口（网关）、对象/文件存储（OSS/NAS）与镜像拉取管道都落在此章治理面上。**承上启下**：承第 6 章资源与调度（补齐连接与供给面，底座篇至此收束）；启第 8 章一切即代码（底座上「跑什么、该是什么样」开始写成代码）。
 
 ---
 
@@ -145,6 +145,39 @@ kubectl -n kube-system logs <terway-eniip-pod> -c terway --tail=100 | grep -iE '
 |---|---|---|---|
 | **四层（Service）** | Service + CCM → SLB/NLB | IP/端口负载均衡 | 注解参数、删除保护、暴露面审批 |
 | **七层（Ingress）** | ALB Ingress → ALB | HTTP(S) 路由、TLS、虚拟主机 | IngressClass 集中治理、证书托管 |
+
+两层入口的流量路径——CCM 按声明自动建管云上负载均衡，Terway 让入口直达 Pod：
+
+```mermaid
+flowchart TB
+    U["用户流量"] --> Q{"按协议选入口"}
+    Q -->|"HTTP(S)：路由 / TLS / 域名"| ALB
+    Q -->|"裸 TCP/UDP、超低延迟"| NLB
+
+    subgraph CLOUD["云上入口层 · 删除保护必开"]
+      ALB["ALB · 七层<br/>ALB Ingress 声明路由<br/>证书托管自动续期"]
+      NLB["NLB · 四层<br/>Service type: LoadBalancer<br/>loadBalancerClass: nlb"]
+    end
+
+    subgraph ACK["ACK 集群 · Terway Pod 直通 VPC"]
+      CCM["CCM 控制器<br/>按 Service/Ingress 注解建管 ALB/NLB"]
+      SVC["ClusterIP Service<br/>集群内部互访，默认形态"] --> EP["Endpoints<br/>就绪 Pod 名单"] --> P["demo-api ×3<br/>多 AZ 打散，见 6.3"]
+    end
+
+    ALB --> P
+    NLB --> P
+    CCM -.->|"监听 / 后端同步"| ALB
+    CCM -.->|"监听 / 后端同步"| NLB
+
+    classDef user fill:#fef9c3,stroke:#ca8a04,color:#713f12,stroke-width:2px
+    classDef cloudlb fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef inside fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
+    classDef pod fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+    class U,Q user
+    class ALB,NLB cloudlb
+    class CCM,SVC,EP inside
+    class P pod
+```
 
 四层/七层选型一行判断：**HTTP(S) 路由/TLS/路径域名治理 → ALB；裸 TCP/UDP、超低延迟 → NLB**（经典 CLB 仅存量兼容）。权衡的核心：四层简单可控但只懂 IP/端口，七层智能但多一层控制器——生产用"七层收口 + 四层点对点"。
 
@@ -333,6 +366,37 @@ spec:
 | **拓扑** | **可用区级资源**，不能跨 AZ 挂载 | 地域级，跨 AZ 共享 | 地域级，跨 AZ 共享 |
 | **典型负载** | 数据库、消息队列 | 多 Pod 共享目录、共享工作区 | 静态资源只读分发、备份归档 |
 | **AWS 对照** | EBS gp3 | FSx for Lustre / EFS | S3 Mountpoint |
+
+三条供给链路——PVC 声明需求，CSI 按 StorageClass 调云 API 建卷，云盘链路靠 WaitForFirstConsumer 保证与 Pod 同可用区：
+
+```mermaid
+flowchart TB
+    POD["Pod<br/>spec.volumes 引用 PVC"] --> PVC["PVC<br/>声明容量与 StorageClass"] --> SC{"StorageClass<br/>选供给后端"}
+
+    subgraph CSI["CSI 动态供给"]
+        direction LR
+        C1["云盘 CSI<br/>diskplugin"] --> C2["NAS CSI<br/>nasplugin"] --> C3["OSS CSI<br/>ossplugin"]
+    end
+
+    SC -->|alicloud-disk-essd-pl1| C1
+    SC -->|alicloud-nas-capacity| C2
+    SC -->|alicloud-oss-readonly| C3
+    C1 --> V1["PV · 云盘<br/>AZ 级 · RWO<br/>WFIC 等 Pod 调度后建同 AZ 盘"]
+    C2 --> V2["PV · NAS 挂载点<br/>地域级 · RWX<br/>多 Pod 跨节点共享"]
+    C3 --> V3["PV · OSS 桶<br/>地域级 · 只读挂载<br/>静态资源 / 备份"]
+    V1 --> M["Attach / Mount<br/>挂到 Pod 所在节点"]
+    V2 --> M
+    V3 --> M
+
+    classDef app fill:#fef9c3,stroke:#ca8a04,color:#713f12,stroke-width:2px
+    classDef drv fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
+    classDef vol fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+    classDef mnt fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    class POD,PVC app
+    class C1,C2,C3 drv
+    class V1,V2,V3 vol
+    class M mnt
+```
 
 三种存储也是三份「契约」——承诺什么 / 不承诺什么（选型前先读"不承诺"列，那是踩坑高发区）：
 

@@ -1,10 +1,8 @@
 # 第9章 ArgoCD声明式GitOps生产交付体系
 <!-- 第三篇 声明式交付体系 ｜ 知识型工程章节 ｜ 状态：终审中 -->
 
-> 本章定位：以 ArgoCD 为实例，讲透 GitOps 的**系统原理**——它不是"部署工具"，而是一个运行在 Kubernetes 之外、以 Git 为 Desired State、通过 Kubernetes API 持续执行 Diff + Reconcile 的**控制器系统**。全章按知识递进组织：Push CD 丢掉了什么（9.1）→ OutOfSync 怎么算出来（9.2）→ ArgoCD 五段工作流与两层 Controller（9.3）→ Git/Chart/Values/Image 谁负责什么（9.4）→ Drift 分型与 Ownership Boundary（9.5）→ 可复现交付与 Release Identity（9.6）→ 高可用与瓶颈（9.7）→ 三层权限治理（9.8）→ 故障诊断状态机（9.9）→ 总架构与 SOP（9.10）。
->
-> **第三篇知识链**：第 8 章讲"如何**定义** Desired State"（Terraform/Helm）；本章讲"如何让系统**持续收敛**到 Desired State"（ArgoCD）；第 10 章讲"如何让新旧 Desired State **安全迁移**"（Rollouts）。三章是一条知识链，不是三个工具。
-> **主线定位**：本章为交付层持续收敛——L1 机械自治在交付域的延伸（Controller of Controllers）（三层自治见 1.5；L3 = 运维 Agent 引擎，15.4⑤/15.5）。 **主旨绑定**：运维 Agent 制品变更走同一条 GitOps 纪律——分诊器 prompt/评测集变更（15.5②）、规则表/白名单变更（15.4②）不因"智能"而豁免变更治理。 **承上启下**：承第 8 章定义；启第 10 章灰度与 15.5 变更事实（收敛 → 安全迁移/变更供给线）。
+> 本章定位：以 ArgoCD 为实例，讲透 GitOps 的**系统原理**——它不是「部署工具」，而是运行在 Kubernetes 之外、以 Git 为 Desired State、通过 Kubernetes API 持续执行 Diff + Reconcile 的**控制器系统**。第三篇是一条知识链：第 8 章讲如何**定义** Desired State（Terraform/Helm），本章讲如何让系统**持续收敛**到它（ArgoCD），第 10 章讲如何向新状态**安全迁移**（Rollouts）。
+> **主线定位**：交付层持续收敛——L1 机械自治在交付域的延伸（Controller of Controllers）；分诊器 prompt/评测集（15.5②）与规则表/白名单（15.4②）的变更走同一条 GitOps 纪律，不因「智能」而豁免变更治理。**承上启下**：承第 8 章定义；启第 10 章灰度与 15.5 变更事实（收敛 → 安全迁移/变更供给线）。
 
 ---
 
@@ -53,21 +51,7 @@ Deployment Controller 检测到 Diff
         → "生产现在跑的什么？"只能翻 CI 日志
 ```
 
-**② GitOps 增加了什么：Controller of Controllers**。K8s 内层控制器的 Desired 来自 API 里的 YAML；GitOps 把这个链条再延长一层——**在 K8s 之外再放一个控制器，它的 Desired 是 Git**：
-
-```text
-Git（Desired State 的持久真相源）
- ↓
-ArgoCD Controller（外层：交付层调谐）
- ↓
-Kubernetes API（写入 Desired Manifest）
- ↓
-K8s Controllers（内层：运行层调谐）
- ↓
-Actual Runtime（Pod 实际运行）
-```
-
-这就是 **Controller of Controllers**：外层控制器调谐"集群该部署什么"，内层控制器调谐"应用该运行成什么样"。**ArgoCD 不运行应用，K8s 才运行应用**——ArgoCD 只负责把 Desired 写进 K8s API。
+**② GitOps 增加了什么：Controller of Controllers**。K8s 内层控制器的 Desired 来自 API 里的 YAML；GitOps 把这个链条再延长一层——**在 K8s 之外再放一个控制器，它的 Desired 是 Git**：Git → ArgoCD（外层：调谐"集群该部署什么"）→ K8s API → 内层控制器（调谐"应用该运行成什么样"）→ 实际运行（两层控制器全图见 9.3 核心图）。这就是 **Controller of Controllers**。**ArgoCD 不运行应用，K8s 才运行应用**——ArgoCD 只负责把 Desired 写进 K8s API。
 
 **③ 为什么必须是 Pull**：控制器要持续 reconcile，就必须常驻集群内、主动拉取 Git——这带来凭据方向的反转：
 
@@ -185,7 +169,7 @@ Desired = Live（所有资源所有比较字段）     → Synced
 ### 最小可行方案
 
 1. **接受对账模型**：Desired Manifest（渲染后）vs Live Manifest（归一化后），字段级 Diff。
-2. **策略分级**：dev/staging 自动收敛（automated + selfHeal）；生产手动 + CI 门禁（9.7 边界）。
+2. **策略分级**：dev/staging 自动收敛（automated + selfHeal）；生产手动 + CI 门禁（9.4 边界）。
 3. **把 OutOfSync 当信号**：接入告警（9.8 通知），而不是盯着面板看。
 
 ### 生产落地实现
@@ -224,7 +208,7 @@ argocd app get dev-demo-api --refresh
 ### 长效治理方案
 
 - 对账模型（Desired/Live/Diff）进团队共同语言；排查一律从 `argocd app diff` 开始。
-- 策略分级：自动化只给可逆环境；生产的手动边界与 CI 门禁见 9.7。
+- 策略分级：自动化只给可逆环境；生产的手动边界与 CI 门禁见 9.4。
 
 ### 自动化/自治闭环
 
@@ -452,8 +436,7 @@ spec:
 
 automated 的选择题：dev/staging 开 `automated + prune + selfHeal`（快速收敛、试错成本低）；**生产关 automated，CI 里用 `argocd app diff prod-demo-api --exit-code` 做门禁（非零退出 = 有未同步差异，人工 review 后手动 sync）**——用一次人工确认换生产的变更安全。
 
-- 云服务映射：两个私有仓库 = 云效 Codeup（凭据配置见 9.7 ④）；chart 制品（基础 chart）分发走 ACR OCI（8.5 ③）。
-- 数字：新业务接入 = 提交一个 values 目录 + 一个 MR，≤10 分钟（ApplicationSet 自动建档，9.8 ③）。
+- 云服务映射：两个私有仓库 = 云效 Codeup（凭据配置见 9.7 ④）；chart 制品（基础 chart）分发走 ACR OCI（8.5 ③）。新服务自助接入的数字与制品见 9.8 ③（≤10 分钟）。
 
 ### 典型故障案例
 
@@ -753,7 +736,7 @@ Git / Helm（ACR OCI）
    └── Redis：缓存（加速比较，不是事实来源——缓存丢失 = 重新渲染，不丢状态）
 ```
 
-四个组件各自的存在理由：**api-server** 因为人和 CI 需要入口；**repo-server** 因为 Render 是 CPU 密集的独立工作（9.3）；**controller** 因为对账循环必须常驻；**Redis** 因为 Live Manifest 的缓存能让 Diff 不必每次都打 K8s API。
+四个组件与五段的职责映射 9.3 ③ 已一张表说清，不再重复——本节只补容量视角：**Render 是 CPU 密集的独立工作，repo-server 因此天生是容量敏感点**（下文瓶颈推导由此展开）。
 
 **② 渲染瓶颈的推导链（本节核心工程知识）**：
 
@@ -946,7 +929,7 @@ chart-root/                             # 编排仓库：只放 values 与 Appli
     └── prod/                           # CODEOWNERS 双审批目录（下 ④）
 ```
 
-晋升即复制：dev 验证通过后，把目录值复制到 staging/prod 同路径提交 MR——晋升路径可见、可 diff、可审批。
+晋升即复制 MR（语义与收益见 9.6 ②；审批规则见下 ④）。
 
 **② App-of-Apps 根 Application（一个根管全部）**：
 
@@ -1197,14 +1180,7 @@ argocd app get <app>                     # 看 operationState.phase 与 message
 
 治本：给 CRD 清单加注解 `argocd.argoproj.io/sync-wave: "-1"`（数字越小越先同步，默认 0），或 CRD 独立先行安装；Operator 类应用建议在 Application 上加 `retry`（如 limit 5、backoff 30s 起步）。
 
-**⑤ 应急 rollback 通道（与 12.3 SOP 完全一致的纪律）**：
-
-```bash
-argocd app set prod-demo-api --sync-policy none   # 回滚前先停 auto-sync，否则 Git 又把新版同步回来
-argocd app history prod-demo-api                  # 秒查版本清单（9.6 Release Identity 的应用）
-argocd app rollback prod-demo-api 12              # 回到 revision 12；目标端到端 ≤5 分钟（对齐 12.3 止损目标）
-# 止损后 2h 内回写 Git（提交等价变更或 revert），再恢复同步策略——同一份制度，两章一致
-```
+**⑤ 应急 rollback 通道（命令见 9.6 ① 应急通道，此处只锁纪律）**：回滚前必先停 auto-sync——`argocd app set <app> --sync-policy none`——否则下一轮对账 Git 又把新版同步回来；止损后 2h 内回写 Git（提交等价变更或 revert）、再恢复同步策略——与 12.3 SOP 同一制度、两章一致维护。
 
 权衡的核心：**排障不是记命令，是走状态机**——命令只是每个节点的查询动作；理解状态机的人，遇到没见过的异常也能推导出下一个查询点。
 
