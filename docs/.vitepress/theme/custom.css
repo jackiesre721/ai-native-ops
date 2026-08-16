@@ -99,6 +99,7 @@
 .vp-doc .mermaid svg {
   max-width: none;   /* 放开压缩：按自然宽度渲染，超宽时容器出横向滚动条 */
   height: auto;
+  flex-shrink: 0;    /* 容器是 flex 居中布局——不禁止收缩，SVG 仍会被压到容器宽（实测 3135px 被压成 567px） */
 }
 
 /* ---- 标题：锚点 hover 用品牌色（自动继承） ---- */

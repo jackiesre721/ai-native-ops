@@ -9,34 +9,29 @@
 本章核心图——AI 原生运维总纲（数据源无处不在：一切可查询的信号皆数据——可观测存储栈与云服务同层，都是引擎的数据源；中间没有"数据层"，只有引擎的取数手）：
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph SRCS["数据源 · 一切可查询的信号（存储栈与业务系统同层）"]
-        direction TB
-        S0["可观测栈与台账<br/>OTel · VM · Loki · Tempo · 故障台账<br/>原始信号的聚合视图"]
-        S1["集群与节点<br/>K8s API · 事件 · Pod 状态"]
-        S2["云服务<br/>RDS · Redis · SLB · 云监控"]
-        S3["变更<br/>Git 提交 · ArgoCD 发布记录"]
-        S4["人<br/>工单 · Runbook · 复盘（context）"]
+        direction LR
+        S0["可观测栈与台账<br/>OTel · VM · Loki · Tempo<br/>故障台账"]
+        S1["集群与节点<br/>K8s API · 事件<br/>Pod 状态"]
+        S2["云服务<br/>RDS · Redis · SLB<br/>云监控"]
+        S3["变更<br/>Git 提交<br/>ArgoCD 发布记录"]
+        S4["人<br/>工单 · Runbook<br/>复盘（context）"]
+        S0 ~~~ S1 ~~~ S2 ~~~ S3 ~~~ S4
     end
     CTX["上下文装配 · 四件套 60 秒<br/>引擎的取数手（15.5①）"]
     E["核心引擎<br/>LLM + Agent<br/>意图理解 · 多步推理"]
     subgraph APPS["应用场景"]
-        direction TB
+        direction LR
         A["智能告警<br/>聚合降噪 · 根因分析"]
         F["故障自愈<br/>自动诊断 · 修复执行"]
         N["交互升级<br/>自然语言查询"]
         L["分级自治<br/>L0–L5 · 人审核护栏"]
+        A ~~~ F ~~~ N ~~~ L
     end
-    S0 --> CTX
-    S1 --> CTX
-    S2 --> CTX
-    S3 --> CTX
-    S4 --> CTX
-    CTX --> E
-    E --> A
-    E --> F
-    E --> N
-    E --> L
+    SRCS -->|"一切可查询的信号"| CTX
+    CTX -->|"数据驱动"| E
+    E --> APPS
     classDef src fill:#e0e7ff,stroke:#3451b2,color:#1e3a8a,stroke-width:2px
     classDef ctx fill:#ccfbf1,stroke:#0d9488,color:#134e4a,stroke-width:2px
     classDef eng fill:#3451b2,color:#ffffff,stroke:#2a4090,stroke-width:2px
@@ -467,7 +462,7 @@ flowchart BT
 三场景之上还有一条更大的环：把运维闭环沿研发链路延长，让每一次信号、每一件工作都一路走到代码与测试。环有两个入口：**信号驱动**（报警、SLO 燃烧、异常检测——"出事了"）与**工作驱动**（工单、例行巡检、发布请求、容量与成本任务——"没出事也要干"）——引擎不只是消防员，也是接日常活的同事——
 
 ```mermaid
-flowchart LR
+flowchart TB
     SIG["信号源<br/>报警 · SLO 燃烧 · 异常检测"] --> SV["关联服务<br/>注册表 + 依赖拓扑"]
     TASK["工作源<br/>工单 · 例行巡检 · 发布请求 · 容量/成本任务"] --> SV
     SV --> CD["关联代码<br/>变更事实 × 告警时间窗"]
