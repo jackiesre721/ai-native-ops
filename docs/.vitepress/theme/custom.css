@@ -84,7 +84,7 @@
   color: var(--vp-c-brand-2);
 }
 
-/* ---- mermaid 图：居中卡片 + overflow 兜底 ---- */
+/* ---- mermaid 图：居中卡片 + 横向滚动（自然尺寸，不整体缩放） ---- */
 .vp-doc .mermaid-wrapper,
 .vp-doc .mermaid {
   display: flex;
@@ -97,7 +97,7 @@
   overflow-x: auto;
 }
 .vp-doc .mermaid svg {
-  max-width: 100%;
+  max-width: none;   /* 放开压缩：按自然宽度渲染，超宽时容器出横向滚动条 */
   height: auto;
 }
 

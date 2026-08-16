@@ -114,6 +114,14 @@ export default withMermaid({
   }),
   mermaid: {
     theme: 'base',
+    startOnLoad: true,
+    flowchart: {
+      useMaxWidth: false,   // 按自然尺寸渲染，超宽由容器横向滚动——避免整体缩放导致文字过小
+      htmlLabels: true,
+      nodeSpacing: 60,
+      rankSpacing: 70,
+      padding: 12
+    },
     themeVariables: {
       primaryColor: '#3451b2',
       primaryTextColor: '#ffffff',
@@ -123,7 +131,7 @@ export default withMermaid({
       secondaryTextColor: '#1e3a8a',
       tertiaryColor: '#f1f5f9',
       tertiaryTextColor: '#374151',
-      fontSize: '14px'
+      fontSize: '16px'
     }
   }
 })
