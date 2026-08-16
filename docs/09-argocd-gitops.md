@@ -1,4 +1,4 @@
-# 第9章 ArgoCD声明式GitOps生产交付体系
+# 第9章【L1 延伸】ArgoCD声明式GitOps生产交付体系
 <!-- 第三篇 声明式交付体系 ｜ 知识型工程章节 ｜ 状态：终审中 -->
 
 > 本章定位：以 ArgoCD 为实例，讲透 GitOps 的**系统原理**——它不是「部署工具」，而是运行在 Kubernetes 之外、以 Git 为 Desired State、通过 Kubernetes API 持续执行 Diff + Reconcile 的**控制器系统**。第三篇是一条知识链：第 8 章讲如何**定义** Desired State（Terraform/Helm），本章讲如何让系统**持续收敛**到它（ArgoCD），第 10 章讲如何向新状态**安全迁移**（Rollouts）。
@@ -212,7 +212,7 @@ argocd app get dev-demo-api --refresh
 
 ### 自动化/自治闭环
 
-本节是交付层机械自治的**核心循环**：观察→比较→行动的 reconciliation loop 与第 5 章 K8s 内层闭环同构——这是"Controller of Controllers"里外层控制器的运转机理。
+本节是交付层机械自治（L1 延伸）的**核心循环**：观察→比较→行动的 reconciliation loop 与第 5 章 K8s 内层闭环同构——这是"Controller of Controllers"里外层控制器的运转机理。
 
 ### 生产检查清单
 
@@ -339,7 +339,7 @@ argocd app sync dev-demo-api --dry-run
 
 ### 自动化/自治闭环
 
-本节展开外层控制器的内部机理：Fetch/Render/Diff/Sync/Health 五段中，Diff 与 Health 是"观察"，Sync 是"行动"——正是第 5 章调谐闭环在交付层的逐段实例化。
+本节展开外层控制器的内部机理：Fetch/Render/Diff/Sync/Health 五段中，Diff 与 Health 是"观察"，Sync 是"行动"——正是第 5 章调谐闭环（L1）在交付层的逐段实例化。
 
 ### 生产检查清单
 
@@ -847,7 +847,7 @@ kubectl -n argocd edit configmap argocd-ssh-known-hosts-cm
 
 ### 自动化/自治闭环
 
-本节是交付层机械自治的**执行可靠性**：9.2 的对账循环依赖 controller/repo-server 持续运转——中枢高可用与容量充足，是交付自治的底座。
+本节是交付层机械自治（L1 延伸）的**执行可靠性**：9.2 的对账循环依赖 controller/repo-server 持续运转——中枢高可用与容量充足，是交付自治的底座（15.4⑤ 引擎的变更事实供给线也跑在这套中枢上）。
 
 ### 生产检查清单
 
@@ -1212,7 +1212,7 @@ argocd app get <app>                     # 看 operationState.phase 与 message
 
 ### 自动化/自治闭环
 
-本节让交付的机械自治**在生产可靠兑现**：selfHeal 持续生效，ignoreDifferences 划清自治边界，状态机让自治异常可诊断——为第 10 章灰度治理提供可靠地基。
+本节让交付的机械自治（L1 延伸）**在生产可靠兑现**：selfHeal 持续生效，ignoreDifferences 划清自治边界，状态机让自治异常可诊断——为第 10 章灰度治理提供可靠地基。
 
 ### 生产检查清单
 

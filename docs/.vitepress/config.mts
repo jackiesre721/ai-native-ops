@@ -50,43 +50,43 @@ export default withMermaid({
           ]
         },
         {
-          text: '第一篇 · 现代运维范式',
+          text: '第一篇 · 现代运维范式（定纲）',
           items: [
-            { text: '第 1 章 云原生与 AI 原生运维架构演进', link: '/01-cloudnative-ai-evolution' },
-            { text: '第 2 章 不可变基础设施与容器软件供应链治理', link: '/02-immutable-infra-supply-chain' },
-            { text: '第 3 章 AI 原生运维统一范式', link: '/03-ainative-ops-paradigm' }
+            { text: '第 1 章【三层自治总纲】云原生与 AI 原生运维架构演进', link: '/01-cloudnative-ai-evolution' },
+            { text: '第 2 章【Agent 制品地基】不可变基础设施与容器软件供应链治理', link: '/02-immutable-infra-supply-chain' },
+            { text: '第 3 章【主旨立论宪法】AI 原生运维统一范式', link: '/03-ainative-ops-paradigm' }
           ]
         },
         {
-          text: '第二篇 · Kubernetes 底座',
+          text: '第二篇 · K8s 底座（L1 施工）',
           items: [
-            { text: '第 4 章 K8s 分布式架构与生产治理', link: '/04-k8s-architecture-governance' },
-            { text: '第 5 章 声明式 API 与控制循环 ★机械自治', link: '/05-declarative-api-reconcile' },
-            { text: '第 6 章 K8s 资源与精细化调度治理', link: '/06-k8s-scheduling-resources' },
-            { text: '第 7 章 K8s 网络、存储与服务治理', link: '/07-k8s-network-storage' }
+            { text: '第 4 章【L1 基座】K8s 分布式架构与生产治理', link: '/04-k8s-architecture-governance' },
+            { text: '第 5 章【L1 机械自治基石】声明式 API 与控制循环 ★理论核心', link: '/05-declarative-api-reconcile' },
+            { text: '第 6 章【L1 基座】K8s 资源与精细化调度治理', link: '/06-k8s-scheduling-resources' },
+            { text: '第 7 章【L1 基座】K8s 网络、存储与服务治理', link: '/07-k8s-network-storage' }
           ]
         },
         {
-          text: '第三篇 · 声明式交付体系',
+          text: '第三篇 · 声明式交付（L1 延伸）',
           items: [
-            { text: '第 8 章 一切即代码：声明式治理全域架构', link: '/08-everything-as-code' },
-            { text: '第 9 章 ArgoCD 声明式 GitOps 生产交付', link: '/09-argocd-gitops' },
-            { text: '第 10 章 灰度发布与生产变更风险治理', link: '/10-canary-release-risk' }
+            { text: '第 8 章【L1 机械自治】一切即代码：声明式治理全域架构', link: '/08-everything-as-code' },
+            { text: '第 9 章【L1 延伸】ArgoCD 声明式 GitOps 生产交付', link: '/09-argocd-gitops' },
+            { text: '第 10 章【L1→L2 过渡】灰度发布与生产变更风险治理', link: '/10-canary-release-risk' }
           ]
         },
         {
-          text: '第四篇 · 可观测与稳定性',
+          text: '第四篇 · 可观测与稳定性（L2 输入与标尺）',
           items: [
-            { text: '第 11 章 OpenTelemetry 全域可观测体系', link: '/11-opentelemetry-observability' },
-            { text: '第 12 章 告警治理、SLO 与故障应急体系', link: '/12-alerting-slo-incident' },
-            { text: '第 13 章 SRE 稳定性与资源成本治理', link: '/13-sre-stability-cost' }
+            { text: '第 11 章【L2 输入】OpenTelemetry 全域可观测体系', link: '/11-opentelemetry-observability' },
+            { text: '第 12 章【L2 运维自治】告警治理、SLO 与故障应急体系', link: '/12-alerting-slo-incident' },
+            { text: '第 13 章【L2 运维自治·预算护栏】SRE 稳定性与资源成本治理', link: '/13-sre-stability-cost' }
           ]
         },
         {
-          text: '第五篇 · 平台工程与自治',
+          text: '第五篇 · 平台工程与自治（L2→L3 终局）',
           items: [
-            { text: '第 14 章 平台工程与开发者自助体系', link: '/14-platform-engineering' },
-            { text: '第 15 章 运维能力平台化与自治闭环 ★运维自治', link: '/15-ops-autonomy-loop' }
+            { text: '第 14 章【L2 支撑】平台工程与开发者自助体系', link: '/14-platform-engineering' },
+            { text: '第 15 章【L2 运维自治 + L3 智能自治终章】运维能力平台化与 Agent 自治闭环 ★理论核心', link: '/15-ops-autonomy-loop' }
           ]
         },
         {

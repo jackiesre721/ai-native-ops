@@ -1,4 +1,4 @@
-# 第5章 声明式API与控制循环核心机制
+# 第5章【L1 机械自治基石】声明式API与控制循环核心机制
 <!-- 第二篇 Kubernetes 底座 ｜ ★理论核心·机械自治（全书第一层理论核心·DDIA 写作法示范章） ｜ 状态：终审中 -->
 
 > 本章定位：三层自治模型**第一层 · 机械自治**——讲清 K8s 声明式调谐闭环（期望状态 → 调谐循环 → 实际状态），实现基础设施层稳态自愈；后续运维自治（第 15 章）与智能自治（15.4⑤/15.5 Agent 引擎）都建立在此之上。实验与制品跑在托管 K8s 上（ACK 主参考、EKS 对照），贯穿案例为墨丘里商城的订单服务 demo-api。
@@ -358,6 +358,17 @@ spec:
 | 上游依赖/数据库故障 | 不能 | 超出 L1 范围，归 L2 运维自治（第 15 章） |
 
 云服务映射：节点故障自愈在托管下是**双保险**——K8s 闭环负责 Pod 重调度，云侧 ACK 节点池自动修复（cordon→drain→替换坏节点）/ EKS 托管节点组自动替换不健康节点；控制面自身故障由云 SLA 兜底（4.2）。数字：**Pod 重建 5–30s、liveness 检测窗 ≈30s、minAvailable 4/5**。
+
+**④ 删除路径的机制：ownerReferences 级联与 finalizer**（"删除也是调谐"——删的是声明，系统负责把现实收走）：
+
+- **级联回收**：Deployment 删除 → 按 ownerReferences 链（RS→Pod）自动回收全部下游对象——与创建同构，删除不需要人挨个清理，这正是 9 章"删 Application 即删发布面"的机制底座。
+- **finalizer = 删除的完成义务**：带 finalizer 的对象收到删除请求后进入 `Terminating`，先等持有方控制器摘掉 finalizer（清理外部资源：云盘、LB、证书），摘完才真正消失——**删除也是状态机，不是开关**。
+- **排障与处置**：`Terminating` 卡住超 10 分钟 = 某控制器死了或忘了摘 finalizer（CSI/CCM 最常见——PVC 删不掉先查云盘引用）。确认持有方已不存在后可手动摘：`kubectl patch <res> <name> -p '{"metadata":{"finalizers":[]}}' --type=merge`——**这是危险动作，必须先确认外部资源已清理，否则留下孤儿云盘/LB 继续计费（13.3 巡检兜底）**。
+
+**⑤ 闭环自身的可观测（调谐器也是负载，也要被观测）**：托管集群控制面指标不直接暴露（4.2 一图划界的另一面），观测走两条路——
+
+- **症状代理指标**（内建控制器健康度间接看）：API 请求延迟 p99、APF 流控排队（`apiserver_flowcontrol_*`）、事件产生速率突增（reconcile 风暴的第一症状）、etcd 对象数（`etcd_object_counts` 经 apiserver 暴露）——进 VM 由 vmagent 采集（11.3），告警口径同 12.1。
+- **自研 Operator/治理件必须自曝指标**（controller-runtime 内建，ServiceMonitor 接入 11 章栈）：`controller_runtime_reconcile_total{error}`（错误率）、`workqueue_depth`（积压）、`reconcile_time_seconds`（耗时分布）。**热循环（hot loop）检测规则**：`rate(controller_runtime_reconcile_total[5m])` 持续 > 10 次/秒且 workqueue_depth 不降 = requeue 风暴——控制器在空转烧 apiserver，这是自研控制器最典型的生产事故形态（症状：apiserver QPS 无故上涨、etcd p99 变慢）。
 
 ### 典型故障案例
 

@@ -1,4 +1,4 @@
-# 第6章 Kubernetes资源与精细化调度治理
+# 第6章【L1 基座】Kubernetes资源与精细化调度治理
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（原生弹性痛点·与第15章 KEDA 严格解耦） ｜ 状态：终审中 -->
 
 > 本章定位：聚焦 K8s 原生调度与弹性痛点——6.5 直击「CPU 指标正常但业务请求排队、负载异常」的核心问题，与第 15 章 KEDA 分层解耦（本章讲原生缺陷，第 15 章讲平台补齐）。落地环境为托管 K8s（ACK 主参考、EKS 对照），调度与配额约束全部落到节点池标签、污点、多可用区与团队 namespace 上。
@@ -595,6 +595,36 @@ spec:
 kubectl -n team-payment describe resourcequota                                # 团队配额使用率
 kubectl describe node <node> | sed -n '/Allocated resources/,$p' | head -12   # 节点已分配 vs 可分配
 ```
+
+**⑤ QoS 三级与 kubelet 驱逐阈值**（B.1 案例「节点压力驱逐」的规则面——request/limit 不只管调度，还决定节点紧缺时**谁先被牺牲**）：
+
+QoS 由 request/limit 的声明方式自动判定（不可显式指定）：
+
+| QoS 级 | 判定 | 节点紧缺时的待遇 | 典型负载 |
+|---|---|---|---|
+| **Guaranteed** | 每个容器 request = limit（CPU 与内存都设） | 最后被动用 | 核心生产服务（13.2 压测定容后的声明） |
+| **Burstable** | 声明了 request、limit 不全或不等 | 超 request 使用的部分先被收回 | 大多数业务（默认注入后的形态） |
+| **BestEffort** | 什么都没声明 | **最先被驱逐** | 无兜底时的失控 Pod——LimitRange 的存在就是消灭这一级 |
+
+驱逐排序的真实规则（先看行为、再看身份）：**用量超过 request 的优先驱逐 → 同等情况比 PriorityClass（6.3 ⑤）→ 再比超出量**。B.1 的 noisy neighbor 未设 memory limit、实际用量远超 request——它既是拖垮节点的元凶，也自动成为驱逐队列的前排；问题在于**被驱逐的是好几个无辜 Pod 一起**——配额治理（本节①②）的意义就是让这种"连坐"永不发生。
+
+kubelet 软/硬驱逐阈值（硬阈值到线立刻杀，软阈值到线等 grace period；默认硬阈值对生产偏紧，建议放宽并配告警先行）：
+
+```yaml
+# kubelet 配置节选（托管下的落地口：ACK 节点池「节点配置」自定义 kubelet 参数；
+# EKS 走 launch template 的 --kubelet-extra-args 或 Karpenter kubelet 配置——以官方文档为准）
+evictionHard:
+  memory.available: "<1Gi>"      # 生产禁改方向：默认 100Mi 太紧，大内存节点建议 10%
+  nodefs.available: "<10%"
+  imagefs.available: "<15%"
+evictionSoft:
+  memory.available: "<1.5Gi"     # 软线先于硬线：到线先驱逐 BestEffort/超用 Pod
+evictionSoftGracePeriod:
+  memory.available: "2m"
+evictionMaxPodGracePeriod: 60    # 可调：给有 PDB 的服务留出 drain 缓冲
+```
+
+数字体感：软线 1.5Gi → 硬线 1Gi 的 0.5Gi 差距 ≈ 几秒到两分钟的处置窗——**真正的护栏是 12.1 那条"节点内存水位 80%"告警线**（B.1 整改项）：告警在软线之前先响，人就永远不用见到驱逐。
 
 云服务映射与数字：配额要对得上钱——团队 namespace 的资源用量 × 节点池单价，与阿里云费用中心财务单元（分账账单；对照 AWS Cost Allocation Tags）对齐，"谁超额、花在哪"才可见。评审节奏经验值：**配额使用率 >80% 连续两周 → 扩额评审；<30% 连续一月 → 回收 50%**。
 

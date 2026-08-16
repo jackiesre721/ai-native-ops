@@ -4,7 +4,7 @@ layout: home
 hero:
   name: AI 原生运维体系
   text: 以云原生为底座的生产控制系统
-  tagline: 一本以 AI 原生运维为主旨的书——终局是 L3 智能自治；云原生是底座与技能基座，不是并列主范式。
+  tagline: 一本以 AI 原生运维为主旨的书——终局是 L3 智能自治；前 14 章的云原生底座，全是 Agent 引擎控制系统的施工件。
   actions:
     - theme: brand
       text: 开始阅读

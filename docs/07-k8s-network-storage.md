@@ -1,4 +1,4 @@
-# 第7章 Kubernetes网络、存储与服务治理
+# 第7章【L1 基座】Kubernetes网络、存储与服务治理
 <!-- 第二篇 Kubernetes 底座 ｜ 常规章（严控容灾边界） ｜ 状态：终审中 -->
 
 > 本章定位：讲清托管 K8s（阿里云 ACK 主参考、AWS EKS 对照）的网络、流量入口、存储生命周期与生产容灾极简规范——云 CNI（Terway/VPC CNI）、SLB/NLB/ALB 流量网关、云盘/NAS/OSS 三种存储、云盘快照与 RPO/RTO 落地。容灾只到快照 + 指标 + 演练原则，深度容灾归 V2。

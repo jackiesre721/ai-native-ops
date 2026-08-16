@@ -1,4 +1,4 @@
-# 第13章 SRE稳定性与资源成本治理
+# 第13章【L2 运维自治·预算护栏】SRE稳定性与资源成本治理
 <!-- 第四篇 可观测与稳定性 ｜ 常规章（精简提纯、无杂项） ｜ 状态：终审中 -->
 
 > 本章定位：精简提纯 SRE 理念、容量弹性与 FinOps 极简模型——FinOps 只做利用率、闲置回收、规格优化、成本分摊，不展开 FinOps 平台与复杂体系。
@@ -66,6 +66,7 @@ curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
 
 - 四大理念成为团队决策共识，决策卡进周会制度。
 - 决策必引指标、能自动不人工、设计假设失败、韧性主动验证。
+- 决策卡的升级形态是**服务目录**：以 8.5 服务注册表为底本，每个核心服务登记 SLO（12.2 口径）、容量水位（13.2 公式链）、成本三标签（13.3）——变更审批与扩容讨论必须引用目录数据，"指标驱动"从口头承诺固化为工作流。
 
 ### 自动化/自治闭环
 
@@ -157,6 +158,12 @@ wrk -t8 -c500 -d120s --latency http://9.0.4.12:8080/api/orders
 # 判定门槛：p99 ≤ 500ms（12.2 SLO 口径）且 5xx < 0.1%
 # 实测：310 QPS 时 p99 开始越限 → 单副本容量 = 310 × 0.8 ≈ 250 QPS（安全系数可调: 0.7–0.85）
 ```
+
+**压测三注意（实战坑，数字失真多源于此）**：
+
+1. **预热**：JVM 等需预热的服务，冷启动 JIT/本地缓存未热时数字严重偏低——先跑 10 分钟预热流量再采数；
+2. **基线互验**：单次压测环境理想化（无真实流量长尾、缓存命中偏高），结果须与近 7 天历史流量峰值互验——偏差 >20% 先查压测环境，不是直接采信高压测值；
+3. **外部依赖**：压的是全链路不是单点——下游 DB/缓存能否承受同等压力？依赖侧先到瓶颈时，测出的"单副本容量"其实是依赖的容量（典型容量规划盲区）。
 
 **③ 月度容量评审表**（每月一次；当前水位 = 30 天均值/容量，峰值水位 = 30 天峰值/容量）：
 
@@ -410,7 +417,7 @@ aliyun ecs TagResources --ResourceType instance --ResourceId i-xxx --Tag.1.Key=t
 # 按标签出账：费用中心控制台"账单→按标签"，或 BSS OpenAPI 分账账单接口（以官方文档为准）
 ```
 
-Grafana 成本面板思路（一句）：node-exporter/kube-state-metrics 出利用率维度（11 章），账单金额每日定时从费用中心 API 拉取写成自定义指标（vmagent 采集），Grafana 合并出"每 namespace 成本 × 利用率"四象限——高成本、低利用率象限就是下月治理清单。
+Grafana 成本面板思路（一句）：node-exporter/kube-state-metrics 出利用率维度（11 章），账单金额每日定时从费用中心 API 拉取写成自定义指标（vmagent 采集），Grafana 合并出"每 namespace 成本 × 利用率"四象限——高成本、低利用率象限就是下月治理清单。再配一条**成本环比告警**（如 `demo-api 日成本环比 >±10%`，与 13.1 决策卡同口径，走 vmalert → 12.1 同一套告警路由）——成本异常与性能异常进同一应急流程，FinOps 从月度报表升级为准实时治理。
 
 ### 典型故障案例
 
@@ -496,9 +503,10 @@ FinOps 是自治的成本边界：弹性自治若不受成本约束会无限扩�
 | 高危漏洞镜像超期 | HIGH/CRITICAL 运行镜像超 7 天未处理 | 每周 | 2 章（Trivy/ACR 扫描） |
 | 废弃 chart | 三仓库 chart 90 天未被任何应用引用 | 每季 | 9 章 |
 | 低载高配节点 | 专用池节点 CPU <10% 持续 1 周 | 每周 | 13.3 巡检表 |
+| GitOps Drift 未回写 | prod 应用存在漂移且超 2h 未回写（应急回写超时） | 每周 | 9.5 / 12.3 |
 
 ```bash
-# 四项巡检命令（cron 定期跑，输出进评审包）
+# 五项巡检命令（cron 定期跑，输出进评审包）
 # ① EOL：集群版本 vs 云厂商支持矩阵（ACK 控制台/EKS API；落后 >2 小版本 = 红线）
 kubectl version --output json | jq -r '.serverVersion.gitVersion'
 aws eks describe-cluster --name prod --query 'cluster.version' --output text      # 对照
@@ -510,9 +518,14 @@ comm -23 <(helm search repo service-chart/ -o json | jq -r '.[].name' | sort -u)
 # ④ 低载高配节点（node_exporter 进 VM，11 章）：专用池近 7 天平均利用率
 curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
   --data-urlencode 'query=avg by (node) (avg_over_time(node_cpu_seconds_total{mode="idle", node=~"perf-.*"}[7d]))' | jq '.data.result'
+# ⑤ GitOps Drift 审计（9.5 分型 + 12.3 应急回写守护）：prod 漂移超期 = 自动开技术债工单，
+#    不靠人记得回写——"argocd app diff 退出码非 0"即存在漂移
+for app in $(argocd app list -N --proj prod -o name); do
+  argocd app diff "$app" --refresh >/dev/null 2>&1 || echo "DRIFT: $app —— 按 9.5 分型处置（人为修改→回写 Git；让渡字段→补 ignoreDifferences）"
+done
 ```
 
-云服务映射：①比对 **ACK/EKS 版本支持矩阵**（云控制台与 CLI 可查）；②镜像漏洞用 **ACR 安全扫描**（对照 ECR 扫描）；④指标来自 node_exporter + 自建 VM 栈（11 章）。数字：四条红线 + 闭环率 ≥90% + MTTR P50 ≤15min/P90 ≤60min。
+云服务映射：①比对 **ACK/EKS 版本支持矩阵**（云控制台与 CLI 可查）；②镜像漏洞用 **ACR 安全扫描**（对照 ECR 扫描）；④指标来自 node_exporter + 自建 VM 栈（11 章）。数字：五条红线 + 闭环率 ≥90% + MTTR P50 ≤15min/P90 ≤60min。
 
 ### 典型故障案例
 
@@ -527,7 +540,7 @@ curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
 ### 长效治理方案
 
 - 月度三指标看板（从台账自动取数），闭环率 <90% 亮灯进考核。
-- 技术债四项巡检表周期执行，越红线强制排期。
+- 技术债五项巡检表周期执行，越红线强制排期。
 - 根因沉淀为自治规则/准入校验/告警（反哺 12、15 章）。
 
 ### 自动化/自治闭环
@@ -539,7 +552,7 @@ curl -sG 'http://vmsingle-vmstack.observability.svc:8428/api/v1/query' \
 - [ ] 月度三指标看板在出（MTTR P50/P90、根因分布、闭环率，台账自动取数）？
 - [ ] 整改闭环率 ≥90% 且 <90% 亮灯？
 - [ ] 重复故障数 =0 有核验（>0 重开复盘）？
-- [ ] 技术债四项巡检表周期执行（EOL/高危镜像/废弃 chart/低载高配节点）？
+- [ ] 技术债五项巡检表周期执行（EOL/高危镜像/废弃 chart/低载高配节点/GitOps Drift 未回写）？
 - [ ] 根因持续沉淀为自治规则/准入校验（反哺 15 章）？
 
 > **下一章预告**：治理能力齐了，如何交给业务用——第五篇开篇，第 14 章讲平台工程：黄金路径、能力封装、屏蔽复杂度。
