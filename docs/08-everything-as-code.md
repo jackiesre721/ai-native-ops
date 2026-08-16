@@ -654,6 +654,7 @@ service-chart/                    # 业务 chart（service-chart 仓库）：只
 chart-root/                       # chart-root（编排仓库）：环境编排
 ├── Chart.yaml                    # dependencies 汇总所有业务 chart
 ├── values-dev.yaml               # 第二层：环境 overlay（见②）
+├── values-qa.yaml
 ├── values-staging.yaml
 └── values-prod.yaml
 ```
